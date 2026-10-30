@@ -50,11 +50,14 @@ sin_factura=104  sin_devengado=443
    arrastra entre dos y cuatro valores distintos y aparecen errores de tipeo que
    nadie puede detectar: `12370,61` vs `12370,16`, `7422,27` vs `7422,37`.
 
-   | Mes 2026 | Valores por sesión encontrados |
-   | --- | --- |
-   | Enero | 16.753,78 · 10.052,27 |
-   | Febrero a julio | 16.753,78 · 17.722,15 · 10.052,27 |
-   | Agosto y septiembre | 20.550,64 · 13.756,00 · 18.081,68 |
+   Separados por módulo, los cuatro quedan así:
+
+   | Módulo | Enero | Febrero a julio | Agosto y septiembre |
+   | --- | --- | --- | --- |
+   | APE (general) | 16.753,78 | 16.753,78 y 17.722,15 a la vez ⚠️ | 20.550,64 |
+   | CAMI | 10.052,27 | 10.052,27 | 13.756,00 |
+   | OSPEDYC | 16.753,78 | 17.722,15 | 18.081,68 |
+   | OSPIA | 16.753,78 | 17.722,15 | 20.550,64 |
 
 3. **La cantidad de sesiones del mes es calculable, no es un dato.** Verificado
    contra enero 2026: el mes tiene 22 días hábiles y el 1º (jueves) es feriado.
@@ -67,16 +70,18 @@ sin_factura=104  sin_devengado=443
    | 2 | 8, 9 ó 10 | 8 y 9 |
 
    La fórmula es `ocurrencias de los días autorizados − feriados − días internado`,
-   y después se recorta por el tope de la obra social. Los pacientes de OSSACRA,
-   OSPE y UOM con 5 días autorizados aparecen con 20 y no con 21: ahí se ve el tope.
+   y después se recorta por el tope, cuando la obra social tiene uno.
 
    > Los nombres de pacientes de este cuadro y de todos los ejemplos del diseño están
    > reemplazados por nombres ficticios. Ver *Datos personales* al final.
 
 4. **Los CUIT tienen duplicados por tipeo.** SANCOR aparece como `30590354798` (176
    filas) y `30590354799` (2). OSSEG como `...3522`, `...3523` y `...3524`. CAMI con
-   dos CUIT distintos (`30709435538` y `30677896090`), que podrían ser dos módulos
-   reales o un error: hay que confirmarlo.
+   dos CUIT distintos: se adopta `30709435538` (88 filas) sobre `30677896090` (9), y el
+   campo queda editable.
+
+   Por eso el modelo guarda **un** CUIT por obra social, editable, en lugar de
+   repetirlo en cada fila: un CUIT mal tipeado se corrige una vez y no 176.
 
 5. **APROSS no se factura por paciente.** Entra como una sola fila agregada
    (`APROSS 31 pacientes`, monto fijo `5.584.500`) y se cierra aparte con un
@@ -92,11 +97,23 @@ sin_factura=104  sin_devengado=443
    sobre todo por las filas de APROSS (unas 20 por mes, que no tienen contraparte
    individual) y por estos rótulos arrastrados.
 
-7. **Los nombres no coinciden entre planillas.** El mismo paciente aparece con el
+7. **Los topes de sesiones no están en las planillas.** La `Hoja8` parece una tabla de
+   topes, pero no lo es: no es `sesiones semanales × 4` (coincide en 28 pacientes y
+   difiere en 22) y hay 106 casos en 2026 donde se facturó por encima de ese número
+   —SANCOR lo supera 66 veces—. Es la foto de un mes cualquiera.
+
+   Lo único aprovechable es que **11 obras sociales nunca lo superan** (CAMIONEROS,
+   LUZ Y FUERZA, OSECAC, OSFATUN, OSPE, OSSACRA, OSSEG, SUME, UOCRA): son las
+   candidatas a tener tope real, pero hay que confirmarlo con cada una.
+
+8. **Los nombres no coinciden entre planillas.** El mismo paciente aparece con el
    apellido solo en una y con nombre completo en la otra, con la prestación pegada al
    nombre (`… ACUATICA` / `… pileta`), o con el nombre mal tipeado. El cruce automático
    resuelve 395 de 672 filas; 164 quedan como sugerencia a confirmar. Por eso el
    modelo necesita un **ID de paciente** y una tabla de alias, no el nombre como clave.
+
+9. **El DNI y el CUIL de los pacientes no existen en ninguna de las dos planillas.**
+   Los carga el usuario al dar de alta a cada paciente.
 
 ## Datos personales
 

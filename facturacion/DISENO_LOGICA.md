@@ -95,14 +95,15 @@ son el movimiento del año.
 ```
 ObraSocial
   id, nombre
-  cuit                       ← hoy está en la columna "CUIL" de la planilla
+  cuit                       ← hoy está en la columna "CUIL" de la planilla; editable
   condicion_iva              EXENTO | RESPONSABLE_INSCRIPTO | MONOTRIBUTO
-  tope_sesiones_mes          límite propio de cada obra social (ej. OSSACRA 20)
+  tiene_tope                 sí / no — hay obras sociales que no topean (ver R6)
+  tope_sesiones_mes          sólo si tiene_tope; si no, se ignora
   dias_vencimiento           default 60, para el semáforo
   activa
 
 Modulo
-  id, codigo                 APE | CAMI | OSPEDYC | OSTOPIA
+  id, codigo                 APE | CAMI | OSPEDYC | OSPIA
   nombre, activo
 
 Profesional
@@ -112,6 +113,8 @@ Profesional
 ValorModulo                  ← el corazón de "configurable mes a mes"
   modulo_id, anio, mes
   valor_sesion
+  tope_sesiones              opcional: si se carga, pisa el tope de la obra social
+                             para ese módulo y ese mes
   vigente_desde
   UNIQUE (modulo_id, anio, mes)
 
@@ -130,7 +133,8 @@ solo lugar y todos los meses de agosto en adelante quedan bien.
 ```
 Paciente
   id, apellido_nombre
-  dni, cuil                  ← el CUIL real del paciente, que hoy no está en ninguna planilla
+  dni, cuil                  ← los carga el usuario al dar de alta al paciente:
+                             no están en ninguna de las dos planillas
   obra_social_id, modulo_id, profesional_id
   nro_afiliado
   activo
@@ -242,6 +246,25 @@ valor = ValorModulo(modulo_del_paciente, año, mes).valor_sesion
 monto = cantidad_facturable × valor
 ```
 
+Los cuatro módulos y sus valores reales de 2026, extraídos de las fórmulas:
+
+| Módulo | Enero | Febrero a julio | Agosto y septiembre |
+| --- | --- | --- | --- |
+| APE (general) | 16.753,78 | 16.753,78 y 17.722,15 conviviendo ⚠️ | 20.550,64 |
+| CAMI | 10.052,27 | 10.052,27 | 13.756,00 |
+| OSPEDYC | 16.753,78 | 17.722,15 | 18.081,68 |
+| OSPIA | 16.753,78 | 17.722,15 | 20.550,64 |
+
+Dos cosas que se ven acá y que conviene mirar antes de cargar la configuración:
+
+- **De febrero a julio el módulo general tiene dos valores a la vez**: 16.753,78 en 36
+  filas y 17.722,15 en 21. Puede ser un aumento aplicado a un grupo de pacientes, o un
+  aumento que quedó a medio aplicar. Hay que decidir cuál de los dos es el correcto.
+- **OSPEDYC se despega del general en agosto** (18.081,68 contra 20.550,64), así que sí
+  es un módulo con valor propio y no un alias del general.
+- **Las filas de CAMI con prefijo `APE` se facturaban al valor general hasta julio y
+  pasaron al de CAMI en agosto.** Puede ser un cambio de criterio o una corrección.
+
 Si falta el valor del módulo para ese mes, el sistema **no inventa ni arrastra el del
 mes anterior**: bloquea la facturación y avisa
 *"Falta el valor del módulo CAMI para marzo 2026. Cargalo en Configuración → Valores por módulo."*
@@ -254,19 +277,26 @@ El color no se guarda: se calcula al mirar. Así nunca queda desactualizado.
 
 | Estado | Condición | Color |
 | --- | --- | --- |
-| **Cobrado** | la factura tiene pago registrado | 🟩 verde |
+| **Cobrado** | los pagos registrados cubren el monto de la factura | 🟩 verde |
+| **Parcial** | hay pagos registrados pero suman menos que la factura | 🟦 azul |
 | **Pendiente** | emitida, sin pago, y hace menos de 60 días de la emisión | 🟨 amarillo |
 | **Atrasado** | emitida, sin pago, y pasaron 60 días o más desde la emisión | 🟥 rojo |
 | Sin facturar | no hay factura emitida para ese mes y paciente | gris |
 
 ```
 estado_cobranza(factura, hoy):
-    si factura.estado == ANULADA           → anulada
-    si existe pago                         → COBRADO
+    si factura.estado == ANULADA            → anulada
+    cobrado = suma de los pagos de la factura
+    si cobrado >= factura.monto             → COBRADO
+    si cobrado > 0                          → PARCIAL
     dias = hoy − factura.fecha_emision
     si dias >= obra_social.dias_vencimiento → ATRASADO
     si no                                   → PENDIENTE
 ```
+
+El azul gana sobre el amarillo y el rojo a propósito: una factura cobrada a medias no
+es lo mismo que una que no pagaron nada, y conviene que se distinga de un vistazo. El
+saldo pendiente se muestra al lado del monto (`284.814,26 · saldo 84.814,26`).
 
 Los 60 días salen de `obra_social.dias_vencimiento`, no de una constante, porque cada
 obra social paga a su ritmo y conviene poder ajustarlo sin tocar el código.
@@ -293,20 +323,43 @@ caen dentro quedan no facturables. Si `hasta` es null el paciente sigue internad
 las sesiones futuras se marcan a medida que pasan. Al cerrar la internación se
 regeneran las sesiones del rango.
 
-### R6 · Topes por obra social
+### R6 · Topes de sesiones
 
-El tope vive en la obra social y se puede pisar por autorización (un paciente puede
-tener autorizado menos que el máximo de su obra social). Lo que indican los datos de
-2026:
+> **Corrección sobre la versión anterior de este documento.** Yo había leído la
+> `Hoja8` de la planilla como una tabla de topes por obra social. Al verificarla, no
+> lo es. Abajo está lo que realmente dicen los datos.
 
-| Obra social | Tope observado | Confianza |
-| --- | --- | --- |
-| OSSACRA, OSPE, UOM | 20 | alta — pacientes con 5 días autorizados aparecen con 20, no con 21 |
-| SANCOR | sin tope aparente | media — aparecen 21 sesiones |
-| CAMI | 16 ó 20 según el caso | **a confirmar** — hay pacientes con 3 días autorizados facturando 16 |
+Tres comprobaciones sobre la `Hoja8`:
 
-Los tres valores se cargan en Configuración; los de CAMI hay que revisarlos con la
-obra social antes de fijarlos.
+1. No es `sesiones semanales × 4`: coincide en 28 pacientes y difiere en 22.
+2. No es un tope que se respete: en 2026 hay **106 casos** en los que se facturaron
+   más sesiones que el número de esa hoja. SANCOR lo supera 66 veces.
+3. Pero **11 obras sociales nunca lo superan**: CAMIONEROS, LUZ Y FUERZA, OSECAC,
+   OSFATUN, OSPE, OSSACRA, OSSEG, SUME y UOCRA.
+
+La conclusión es que la `Hoja8` es **la foto de un mes cualquiera**, no una tabla de
+topes. Para algunas obras sociales ese número coincide con su tope real; para otras es
+sólo lo que se facturó ese mes. **No se puede deducir el tope de las planillas.**
+
+Por eso el tope es configurable en tres niveles, con esta precedencia:
+
+```
+tope_efectivo(paciente, año, mes):
+    1. autorización.tope_sesiones_mes      si el paciente tiene uno propio
+    2. ValorModulo(módulo, año, mes).tope  si se cargó para ese módulo y mes
+    3. obra_social.tope_sesiones_mes       si obra_social.tiene_tope
+    4. sin tope                            se factura el calendario completo
+```
+
+El nivel 2 es el que pediste para OSPIA: valor y tope cargables mes a mes. Sirve para
+cualquier módulo, no sólo para ese.
+
+El nivel 3 tiene el `tiene_tope` en sí/no explícito en lugar de usar "tope = 0" o
+"tope vacío" para decir "no topea". Que haya que elegir obliga a pensarlo una vez por
+obra social, y evita que un campo sin cargar se interprete como un tope de cero.
+
+Al cargar los topes conviene arrancar por las 11 obras sociales de la lista, que son
+las que probablemente sí topean, y dejar las demás en "sin tope" hasta confirmarlo.
 
 ---
 
@@ -316,18 +369,21 @@ obra social antes de fijarlos.
 
 Cinco pestañas, todas con la misma forma: tabla + alta + edición con confirmación.
 
-1. **Obras sociales** — nombre, CUIT, condición IVA, tope de sesiones, días de
-   vencimiento.
-2. **Módulos** — APE, CAMI, OSPEDYC, OSTOPIA.
-3. **Valores por módulo** — la grilla clave: módulos en las filas, los 12 meses en
-   las columnas. Se ve de un vistazo qué falta cargar.
+1. **Obras sociales** — nombre, CUIT **editable**, condición IVA, tiene tope sí/no,
+   tope de sesiones, días de vencimiento.
+2. **Módulos** — APE, CAMI, OSPEDYC, OSPIA.
+3. **Valores y topes por módulo** — la grilla clave: módulos en las filas, los 12 meses
+   en las columnas, valor y tope en cada celda. Se ve de un vistazo qué falta cargar.
 
-   | Módulo | Ene | Feb | Mar | … |
-   | --- | --- | --- | --- | --- |
-   | APE | 16.753,78 | 17.722,15 | 17.722,15 | … |
-   | CAMI | 10.052,27 | 10.052,27 | ⚠️ falta | … |
-   | OSPEDYC | 16.753,78 | 17.722,15 | 17.722,15 | … |
-   | OSTOPIA | — | — | — | … |
+   | Módulo | Ene | Feb | … | Ago | Sep |
+   | --- | --- | --- | --- | --- | --- |
+   | APE | 16.753,78 | 17.722,15 ⚠️ | … | 20.550,64 | 20.550,64 |
+   | CAMI | 10.052,27 | 10.052,27 | … | 13.756,00 | 13.756,00 |
+   | OSPEDYC | 16.753,78 | 17.722,15 | … | 18.081,68 | 18.081,68 |
+   | OSPIA | 16.753,78 | 17.722,15 | … | 20.550,64 | 20.550,64 |
+
+   El ⚠️ de febrero marca el mes donde la planilla tiene dos valores conviviendo para
+   el módulo general: el sistema lo señala pero no elige por su cuenta.
 
    Con un botón **"Copiar del mes anterior"** para cuando no hay aumento, que es lo
    habitual. Explícito, no automático.
@@ -375,9 +431,12 @@ seleccionables, como se pidió.
 
 ### P4 · Confirmar un pago
 
-Desde cualquier fila amarilla o roja: fecha de pago (obligatoria), monto (viene
-precargado con el de la factura, editable para pagos parciales), medio de pago y
-observaciones. Al guardar, la fila pasa a verde.
+Desde cualquier fila amarilla, roja o azul: fecha de pago (obligatoria), monto (viene
+precargado con el saldo pendiente, editable), medio de pago y observaciones.
+
+Al guardar, la fila pasa a **verde** si el pago completa el monto de la factura, o a
+**azul** si queda saldo. Una factura puede recibir varios pagos: cada uno queda
+registrado con su fecha, y el azul se mantiene hasta que la suma cubra el total.
 
 ### P5 · Ficha del paciente
 
@@ -385,7 +444,7 @@ Lo que se pidió ver completo al seleccionar un paciente:
 
 ```
 PACIENTE EJEMPLO 1
-DNI 12.345.678 · CUIL 27-12345678-4
+DNI 12.345.678 · CUIL 27-12345678-4          [editar]
 SANCOR · CUIT 30-59035479-8 · EXENTO · módulo APE · Lic. PASTE
 Autorización: lunes 15:00 · martes 15:00 · miércoles 16:30 · jueves 16:30
 
@@ -403,6 +462,12 @@ Octubre     18           9        310.000,00   🟥 Atrasado (67 días)
 
 "Transcurridas" = sesiones con fecha menor o igual a hoy. Se recalcula al mirar, así
 que nunca queda vieja.
+
+El DNI y el CUIL los carga el usuario al dar de alta al paciente y se pueden editar
+después: no están en ninguna de las dos planillas, así que el sistema arranca con esos
+campos vacíos y los va completando a medida que se usan. Conviene que la ficha muestre
+un aviso suave mientras falten, sin bloquear la facturación, porque hoy se factura sin
+ese dato.
 
 ### P6 · Tablero anual
 
@@ -516,18 +581,33 @@ datos de prueba antes de meterle 9 años de planillas con nombres inconsistentes
 
 ---
 
-## 8. Lo que falta definir
+## 8. Lo que quedó decidido
 
-Cinco cosas que el diseño no puede resolver solo, porque son decisiones del negocio:
+Las cinco preguntas que este diseño no podía responder solo, ya resueltas:
 
-1. **El CUIL del paciente no está en ninguna planilla.** La columna "CUIL" es el CUIT
-   de la obra social. La ficha de paciente lo pide: hay que conseguir esos datos.
-2. **CAMI tiene dos CUIT** (`30709435538` y `30677896090`) y dos valores de sesión
-   conviviendo en el mismo mes. ¿Son dos módulos distintos o un error arrastrado?
-3. **El tope de CAMI** no se deduce de los datos (hay pacientes con 3 días autorizados
-   facturando 16 sesiones). Hay que confirmarlo con la obra social.
-4. **OSTOPIA no aparece en ninguna de las dos planillas.** Está en el pedido pero no
-   en los datos: hace falta su valor de sesión y su tope.
-5. **Pagos parciales.** El modelo los soporta (varios `Pago` por `Factura`), pero hay
-   que definir qué color le toca a una factura cobrada a medias: ¿verde, amarillo, o un
-   cuarto estado "parcial"?
+| # | Pregunta | Decisión |
+| --- | --- | --- |
+| 1 | El CUIL del paciente no está en las planillas | **Lo carga el usuario** al dar de alta al paciente, y es editable. El sistema no lo deduce de ningún lado |
+| 2 | CAMI tiene dos CUIT | Se usa **`30709435538`** (el de 88 filas contra 9 del otro) y el campo queda **editable** por si hay que corregirlo |
+| 3 | El tope de CAMI no se deduce de los datos | El tope pasa a ser **configurable en sí/no + valor**, y no sólo para CAMI: para todas las obras sociales y, mes a mes, para cada módulo (ver R6) |
+| 4 | "OSTOPIA" no aparecía en las planillas | Era **OSPIA**, y sí está: un paciente con 4 días autorizados, valor igual al módulo general. Valor y tope se cargan **mes a mes** |
+| 5 | Qué color lleva una factura cobrada a medias | **Azul**, como cuarto estado "Parcial", con el saldo pendiente al lado del monto |
+
+## 9. Lo que todavía hay que confirmar
+
+Tres cosas que salieron al revisar los datos y que son decisiones del negocio, no del
+diseño:
+
+1. **El módulo general tiene dos valores conviviendo de febrero a julio de 2026**:
+   16.753,78 en 36 filas y 17.722,15 en 21. ¿Es un aumento que corresponde sólo a un
+   grupo de pacientes, o uno que quedó a medio aplicar? De esto dependen los montos de
+   seis meses.
+
+2. **Las filas de CAMI con prefijo `APE` cambiaron de valor en agosto**: hasta julio se
+   facturaban al módulo general y desde agosto al de CAMI. Hay que saber si fue un
+   cambio de criterio o una corrección de un error anterior.
+
+3. **Qué obras sociales topean de verdad.** Las 11 que nunca superan la `Hoja8`
+   (CAMIONEROS, LUZ Y FUERZA, OSECAC, OSFATUN, OSPE, OSSACRA, OSSEG, SUME, UOCRA) son
+   las candidatas, pero hay que confirmarlo con cada una antes de cargar el tope: si se
+   carga un tope que la obra social no tiene, el sistema va a facturar de menos.

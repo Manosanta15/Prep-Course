@@ -31,6 +31,22 @@ PREFIJOS_CUIT = {
     "APE": "EXENTO",  # APE = modulo de apoyo, factura "A"; la condicion sale de la hoja CUIT
 }
 
+# Los cuatro modulos. El codigo se deduce de la obra social, salvo APE que viene
+# como prefijo del CUIT. 'APE' hace de modulo general para el resto.
+MODULOS = ["APE", "CAMI", "OSPEDYC", "OSPIA"]
+
+
+def deducir_modulo(obra_social, prefijo):
+    """Devuelve el codigo de modulo de una fila de la planilla de sesiones."""
+    os_norm = normalizar(obra_social)
+    for codigo in ("OSPEDYC", "OSPIA"):
+        if codigo in os_norm:
+            return codigo
+    if os_norm == "CAMI":
+        # Dentro de CAMI, el prefijo APE marca las filas que van al modulo general.
+        return "APE" if prefijo == "APE" else "CAMI"
+    return "APE"
+
 
 # --------------------------------------------------------------------------
 # Normalizacion de nombres
@@ -153,8 +169,9 @@ def leer_sesiones(ruta, anio):
     formulas = openpyxl.load_workbook(ruta, data_only=False)
 
     devengado = []
-    valores_modulo = defaultdict(Counter)   # mes -> {valor_sesion: veces}
-    cuits_os = defaultdict(Counter)         # obra_social -> {cuit: veces}
+    valores_modulo = defaultdict(Counter)            # mes -> {valor_sesion: veces}
+    valores_por_modulo = defaultdict(lambda: defaultdict(Counter))  # modulo -> mes -> {valor: veces}
+    cuits_os = defaultdict(Counter)                  # obra_social -> {cuit: veces}
 
     for hoja, mes in hojas_del_anio(valores, anio):
         hv, hf = valores[hoja], formulas[hoja]
@@ -181,12 +198,17 @@ def leer_sesiones(ruta, anio):
             if obra_social and cuit:
                 cuits_os[normalizar(obra_social)][cuit] += 1
 
+            modulo = deducir_modulo(obra_social, prefijo)
+            if valor_sesion is not None:
+                valores_por_modulo[modulo][mes][valor_sesion] += 1
+
             devengado.append({
                 "hoja": hoja,
                 "mes": mes,
                 "paciente": paciente,
                 "paciente_norm": normalizar(paciente),
                 "obra_social": obra_social,
+                "modulo": modulo,
                 "profesional": texto(hv.cell(fila, 4).value),
                 "cuit_obra_social": cuit,
                 "condicion_iva": condicion,
@@ -197,7 +219,7 @@ def leer_sesiones(ruta, anio):
                 "es_convenio_agregado": agregado,
             })
 
-    return devengado, valores_modulo, cuits_os
+    return devengado, valores_modulo, valores_por_modulo, cuits_os
 
 
 def leer_hoja_simple(ruta, hoja, columnas):
@@ -377,8 +399,9 @@ def consolidar_pacientes(devengado, semanales, topes, condiciones):
 # Informe
 # --------------------------------------------------------------------------
 
-def escribir_informe(ruta, anio, pacientes, valores_modulo, cuits_os,
-                     cruces, dudosos, sin_factura, sin_devengado, cierres_apross):
+def escribir_informe(ruta, anio, pacientes, valores_modulo, valores_por_modulo,
+                     cuits_os, cruces, dudosos, sin_factura, sin_devengado,
+                     cierres_apross):
     L = [f"# Informe de conciliacion {anio}", ""]
     L.append(f"- Pacientes consolidados: **{len(pacientes)}**")
     L.append(f"- Cruces automaticos (devengado <-> factura): **{len(cruces)}**")
@@ -397,6 +420,26 @@ def escribir_informe(ruta, anio, pacientes, valores_modulo, cuits_os,
                             for v, n in valores_modulo[mes].most_common())
         L.append(f"| {MESES[mes - 1].title()} | {detalle} |")
     L.append("")
+
+    L += ["## Valor por sesion de cada modulo", "",
+          "Si un modulo tiene mas de un valor en el mismo mes, hay que decidir cual",
+          "es el correcto antes de cargar la configuracion.", "",
+          "| Modulo | " + " | ".join(MESES[m - 1].title()[:3]
+                                     for m in sorted(valores_modulo)) + " |",
+          "| --- |" + " --- |" * len(valores_modulo)]
+    for codigo in MODULOS:
+        if codigo not in valores_por_modulo:
+            continue
+        celdas = []
+        for mes in sorted(valores_modulo):
+            cnt = valores_por_modulo[codigo].get(mes)
+            if not cnt:
+                celdas.append("--")
+            else:
+                marca = " !" if len(cnt) > 1 else ""
+                celdas.append(f"{cnt.most_common(1)[0][0]:,.2f}{marca}")
+        L.append(f"| {codigo} | " + " | ".join(celdas) + " |")
+    L += ["", "`!` = el modulo tiene mas de un valor ese mes.", ""]
 
     L += ["## CUIT por obra social", "",
           "La columna rotulada *CUIL* contiene en realidad el CUIT de la obra social.", "",
@@ -446,7 +489,8 @@ def main():
     salida = Path(args.salida)
     salida.mkdir(parents=True, exist_ok=True)
 
-    devengado, valores_modulo, cuits_os = leer_sesiones(args.sesiones, args.anio)
+    devengado, valores_modulo, valores_por_modulo, cuits_os = leer_sesiones(
+        args.sesiones, args.anio)
     facturas, cierres_apross = leer_facturacion(args.facturacion, args.anio)
 
     semanales = leer_hoja_simple(args.sesiones, "Hoja5", {
@@ -472,6 +516,13 @@ def main():
             str(mes): [{"valor": v, "filas": n} for v, n in cnt.most_common()]
             for mes, cnt in sorted(valores_modulo.items())
         },
+        "modulos": [
+            {"codigo": codigo,
+             "valores_por_mes": {
+                 str(mes): [{"valor": v, "filas": n} for v, n in cnt.most_common()]
+                 for mes, cnt in sorted(valores_por_modulo[codigo].items())}}
+            for codigo in MODULOS if codigo in valores_por_modulo
+        ],
         "pacientes": pacientes,
         "devengado": devengado,
         "facturas": facturas,
@@ -499,8 +550,8 @@ def main():
     (salida / "seed.json").write_text(
         json.dumps(seed, ensure_ascii=False, indent=2), encoding="utf-8")
     escribir_informe(salida / "informe.md", args.anio, pacientes, valores_modulo,
-                     cuits_os, cruces, dudosos, sin_factura, sin_devengado,
-                     cierres_apross)
+                     valores_por_modulo, cuits_os, cruces, dudosos, sin_factura,
+                     sin_devengado, cierres_apross)
 
     print(f"pacientes={len(pacientes)} devengado={len(devengado)} "
           f"facturas={len(facturas)} cruces={len(cruces)} dudosos={len(dudosos)} "
