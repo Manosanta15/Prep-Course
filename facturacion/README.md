@@ -14,7 +14,53 @@ python3 usuarios.py crear --rol admin
 python3 servidor.py
 ```
 
-Y abrir http://localhost:8080. La clave se pide por teclado y no se ve al escribirla.
+Y abrir http://localhost:8080.
+
+### Desde cero en Windows
+
+Si nunca corriste algo así, estos son todos los pasos. En Windows el comando es
+`py`, no `python3`.
+
+**1. Instalar Python.** Bajarlo de [python.org/downloads](https://www.python.org/downloads/)
+y, en la primera pantalla del instalador, **tildar "Add python.exe to PATH"** antes de
+apretar Install. Si no se tilda esa casilla, después la terminal no encuentra Python.
+
+**2. Bajar el código.** Desde GitHub, con la rama `claude/medical-billing-system-lbokkt`
+seleccionada: botón verde **Code → Download ZIP**. Después, click derecho sobre el
+archivo bajado → **Extraer todo**.
+
+**3. Abrir la terminal en la carpeta correcta.** Entrar a la carpeta que se extrajo,
+y de ahí a `facturacion`, y de ahí a `motor`. Con esa carpeta abierta, click derecho en
+un espacio vacío → **Abrir en Terminal** (Windows 11) o, manteniendo Shift, click
+derecho → **Abrir la ventana de PowerShell aquí** (Windows 10).
+
+**4. Escribir estos tres comandos**, uno por vez, apretando Enter después de cada uno:
+
+```powershell
+py datos_demo.py
+```
+
+```powershell
+py usuarios.py crear --rol admin
+```
+
+Acá pide un nombre de usuario y una clave. **La clave no se ve mientras se escribe**,
+ni siquiera como puntitos: es normal, se está escribiendo igual.
+
+```powershell
+py servidor.py
+```
+
+**5. Abrir el navegador** en http://localhost:8080 y entrar con ese usuario y clave.
+
+La ventana de la terminal tiene que quedar abierta mientras se usa el sistema: ahí es
+donde está corriendo. Para cortarlo, `Ctrl+C` en esa ventana, o cerrarla.
+
+Para volver a usarlo otro día alcanza con el paso 3 y `py servidor.py`: los datos
+quedan guardados en el archivo `facturacion.db` de esa misma carpeta.
+
+> Los pacientes que trae son inventados, así que se puede tocar todo sin miedo. Para
+> empezar de cero, se borra `facturacion.db` y se repiten los pasos. La clave se pide por teclado y no se ve al escribirla.
 Los datos de prueba traen un año completo ya facturado para que el semáforo tenga los
 cuatro colores desde el arranque.
 
