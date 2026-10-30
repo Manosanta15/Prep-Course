@@ -1,0 +1,8 @@
+# Datos generados a partir de las planillas reales.
+# Contienen nombres de pacientes e historial clínico-administrativo:
+# no se versionan.
+datos/
+*.xlsx
+*.xls
+__pycache__/
+*.pyc
