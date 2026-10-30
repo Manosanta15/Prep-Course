@@ -246,24 +246,58 @@ valor = ValorModulo(modulo_del_paciente, año, mes).valor_sesion
 monto = cantidad_facturable × valor
 ```
 
-Los cuatro módulos y sus valores reales de 2026, extraídos de las fórmulas:
+#### De dónde sale el valor correcto
 
-| Módulo | Enero | Febrero a julio | Agosto y septiembre |
+Las fórmulas de la planilla de sesiones **no sirven** para esto: quedaron clavadas en
+el valor de enero. La fuente correcta es el campo **Monto** de la planilla de
+facturación, que es lo que realmente se facturó:
+
+```
+valor_sesion = Monto / Cant. Sesiones
+```
+
+Aplicado sobre las filas de SANCOR, que facturan al módulo APE, da la serie exacta.
+Los cuatro módulos de 2026 quedan así:
+
+| Módulo | Ene | Feb | Mar | Abr | May | Jun | Jul | Ago | Sep |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **APE** | 16.753,78 | 17.722,15 | 18.236,09 | 18.856,10 | 19.346,37 | 19.752,65 | 20.127,95 | 20.550,64 | 20.900,00 |
+| **CAMI** | 10.052,27 | 10.052,27 | 10.052,27 | 13.500,00 | 13.500,00 | 13.500,00 | 13.756,00 | 13.756,00 | s/d |
+| **OSPEDYC** | 14.740,98 | 15.593,00 | 16.045,20 | 16.590,74 | 17.022,10 | 17.379,56 | 17.709,77 | 18.081,68 | s/d |
+| **OSPIA** | s/d | s/d | s/d | s/d | s/d | 19.752,65 | 20.127,95 | ⚠️ | s/d |
+
+Tres cosas quedan claras con esta serie:
+
+- **APE aumenta todos los meses.** No es un valor que se fija una vez: es una
+  actualización mensual. Esto es exactamente lo que justifica que `ValorModulo` sea una
+  fila por módulo y por mes, y no un campo en el módulo.
+- **CAMI siempre tiene valor propio, distinto del APE general**, y se mueve por
+  escalones (tres meses en 10.052,27, tres en 13.500,00, dos en 13.756,00) en lugar de
+  todos los meses.
+- **OSPEDYC también tiene serie propia**, más baja que APE todo el año.
+- **OSPIA tiene muy pocos datos** (un paciente, y recién desde junio). El valor de
+  agosto que aparece, 12.370,61, es el valor de 2025: es una fila vieja, no un valor
+  de agosto. Hay que cargarlo a mano.
+
+#### El desfasaje entre las dos planillas
+
+Como las fórmulas de la planilla de sesiones nunca se actualizaron, el devengado quedó
+por debajo de lo facturado en siete de los nueve meses:
+
+| | Devengado según la planilla | Con el valor realmente facturado | Diferencia |
 | --- | --- | --- | --- |
-| APE (general) | 16.753,78 | 16.753,78 y 17.722,15 conviviendo ⚠️ | 20.550,64 |
-| CAMI | 10.052,27 | 10.052,27 | 13.756,00 |
-| OSPEDYC | 16.753,78 | 17.722,15 | 18.081,68 |
-| OSPIA | 16.753,78 | 17.722,15 | 20.550,64 |
+| Enero | 10.290.171,82 | 10.290.171,82 | 0,00 |
+| Marzo | 15.348.594,26 | 16.436.247,63 | +1.087.653,37 |
+| Julio | 16.648.104,68 | 19.832.331,45 | +3.184.226,77 |
+| **Total 9 meses** | **140.435.115,50** | **152.256.723,26** | **+11.821.607,76** |
 
-Dos cosas que se ven acá y que conviene mirar antes de cargar la configuración:
+No es plata perdida: las facturas salieron con el valor correcto, el que está en la
+planilla de facturación. Lo que se perdió es la capacidad de usar la planilla de
+sesiones como control, porque dejó de coincidir con la realidad. Si alguien hubiera
+facturado siguiéndola, habría facturado 11,8 millones de menos en nueve meses.
 
-- **De febrero a julio el módulo general tiene dos valores a la vez**: 16.753,78 en 36
-  filas y 17.722,15 en 21. Puede ser un aumento aplicado a un grupo de pacientes, o un
-  aumento que quedó a medio aplicar. Hay que decidir cuál de los dos es el correcto.
-- **OSPEDYC se despega del general en agosto** (18.081,68 contra 20.550,64), así que sí
-  es un módulo con valor propio y no un alias del general.
-- **Las filas de CAMI con prefijo `APE` se facturaban al valor general hasta julio y
-  pasaron al de CAMI en agosto.** Puede ser un cambio de criterio o una corrección.
+El `informe.md` que genera el script lista mes por mes y módulo por módulo dónde las
+dos planillas discrepan.
 
 Si falta el valor del módulo para ese mes, el sistema **no inventa ni arrastra el del
 mes anterior**: bloquea la facturación y avisa
@@ -595,19 +629,96 @@ Las cinco preguntas que este diseño no podía responder solo, ya resueltas:
 
 ## 9. Lo que todavía hay que confirmar
 
-Tres cosas que salieron al revisar los datos y que son decisiones del negocio, no del
-diseño:
+1. **El valor de OSPIA mes a mes.** Tiene un solo paciente y arranca en junio, así que
+   la planilla no alcanza para reconstruir la serie. Hay que cargarla a mano.
+2. **Qué obras sociales topean de verdad.** La validación del motor contra la planilla
+   (ver abajo) acota mucho la lista, pero conviene confirmarla con cada obra social
+   antes de cargar el tope: si se carga un tope que no existe, el sistema factura de
+   menos.
+3. **Los días autorizados de la semana están desactualizados en la planilla.** El motor
+   los necesita para generar las fechas, y hoy la `Hoja5` no coincide con lo que se
+   factura en 110 de 414 casos. Es el dato que hay que reconfirmar paciente por
+   paciente antes de migrar.
 
-1. **El módulo general tiene dos valores conviviendo de febrero a julio de 2026**:
-   16.753,78 en 36 filas y 17.722,15 en 21. ¿Es un aumento que corresponde sólo a un
-   grupo de pacientes, o uno que quedó a medio aplicar? De esto dependen los montos de
-   seis meses.
+---
 
-2. **Las filas de CAMI con prefijo `APE` cambiaron de valor en agosto**: hasta julio se
-   facturaban al módulo general y desde agosto al de CAMI. Hay que saber si fue un
-   cambio de criterio o una corrección de un error anterior.
+## 10. Etapa 2 y 3: el motor de sesiones
 
-3. **Qué obras sociales topean de verdad.** Las 11 que nunca superan la `Hoja8`
-   (CAMIONEROS, LUZ Y FUERZA, OSECAC, OSFATUN, OSPE, OSSACRA, OSSEG, SUME, UOCRA) son
-   las candidatas, pero hay que confirmarlo con cada una antes de cargar el tope: si se
-   carga un tope que la obra social no tiene, el sistema va a facturar de menos.
+Implementadas en `motor/`. Las dos etapas van juntas porque los feriados y las
+internaciones son entradas de la misma función que genera las fechas.
+
+| Archivo | Qué hace |
+| --- | --- |
+| `modelo.py` | Las entidades de la sección 2 como dataclasses, sin dependencias |
+| `sesiones.py` | R1 (generación), R2 (monto), R6 (tope en cascada) |
+| `feriados.py` | Semilla de feriados nacionales, con Pascua calculada |
+| `test_sesiones.py` | 34 tests |
+| `validar_contra_planilla.py` | Contrasta el motor con lo que la planilla factura |
+
+### Lo que devuelve el motor
+
+No un número, sino el número **y su porqué**:
+
+```python
+r = generar_sesiones(autorizacion, 2026, 1, obra_social, feriados=[...])
+
+r.cantidad                  # 21
+r.explicacion()             # "21 sesiones · no se cuentan 1 por feriado: 01/01"
+r.transcurridas(hoy)        # 10 al 15/01/2026
+r.descartadas_por(FERIADO)  # las fechas concretas, con su descripción
+r.tope_aplicado             # None si la obra social no topea
+```
+
+`transcurridas` se calcula al mirar, con la fecha que se le pase, así que nunca queda
+vieja. Es lo que alimenta la ficha del paciente (P5).
+
+### Decisiones de implementación
+
+- **El tope se aplica al final y descarta las últimas fechas del mes**, no las
+  primeras: las primeras ya se prestaron. Las descartadas quedan con motivo
+  `FUERA_DE_TOPE`, no desaparecen.
+- **Un día que es feriado y además cae en internación se descuenta una sola vez.** El
+  motivo que queda registrado es el feriado, porque es el que aplica a todos los
+  pacientes.
+- **Si falta el valor del módulo, el motor levanta `ValorModuloFaltante`** en lugar de
+  usar el del mes anterior. Es la decisión de R2 llevada a código: el desfasaje de 11,8
+  millones salió justamente de arrastrar valores en silencio.
+- **La internación de un paciente no afecta a otro**, aunque el rango de fechas se
+  solape. Hay un test para eso.
+
+### Qué dice la validación contra la planilla
+
+El motor reproduce enero 2026 exactamente: con los cinco días autorizados y el feriado
+del 1º da 21, que es lo que factura la planilla. Los tests cubren los cuatro casos
+(5, 4, 3 y 2 días por semana) contra los números reales.
+
+Sobre los 414 meses-paciente facturados en 2026:
+
+| Resultado | Casos | Qué significa |
+| --- | --- | --- |
+| Explicable | 242 · 58,5% | El número facturado es uno de los que permite el calendario |
+| Por encima | 110 · 26,6% | Facturó **más** de lo que permiten sus días autorizados |
+| Por debajo | 62 · 15,0% | Facturó menos: internación, ausencias o un tope |
+
+Los dos grupos que no cierran dicen cosas distintas:
+
+- **Los 62 "por debajo" tienen una firma clara: 20 de ellos facturan exactamente 20**,
+  y son de OSSEG, OSSACRA y OSPE. Eso es un tope de 20 funcionando. Confirma por otra
+  vía la lista de obras sociales que topean.
+- **Los 110 "por encima" son un problema de datos, no del motor**: hay pacientes con 2
+  días autorizados en la `Hoja5` que facturan 20 sesiones. La `Hoja5` está vieja —ella
+  misma tiene anotaciones como "se habían pedido 5" y "esperando autorización"—. Son
+  los pacientes cuya autorización hay que reconfirmar antes de migrar.
+
+Para correr la validación:
+
+```bash
+cd facturacion/motor
+python3 validar_contra_planilla.py SESIONES.xlsx --anio 2026
+```
+
+### Lo que sigue
+
+Etapa 4: facturas, pagos y semáforo. El modelo ya tiene `Factura`, `Pago` y
+`EstadoCobranza` con el azul de los pagos parciales; falta la función que resuelve el
+estado y la pantalla de carga.

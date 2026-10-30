@@ -5,20 +5,44 @@ históricas por un programa, y el script que las fusiona en un modelo normalizad
 
 - **[DISENO_LOGICA.md](DISENO_LOGICA.md)** — las tres maneras posibles de armar la
   lógica, la recomendada, el modelo de datos y todas las reglas de negocio.
+- **[motor/](motor/)** — etapas 2 y 3 implementadas: el motor que genera las sesiones a
+  partir de los días autorizados, descontando feriados e internación.
 - **[scripts/extraer_planillas.py](scripts/extraer_planillas.py)** — lee las dos
   planillas, las cruza y produce el modelo normalizado más un informe de conciliación.
-- **datos/seed.json** — modelo normalizado (generado).
-- **datos/informe.md** — qué se pudo cruzar y qué quedó pendiente de revisión manual
-  (generado).
+- **datos/** — `seed.json` e `informe.md`, generados. No se versionan.
 
-## Cómo correr la extracción
+## Cómo correr
+
+Extracción y conciliación de las dos planillas:
 
 ```bash
 cd facturacion/scripts
 python3 extraer_planillas.py SESIONES_A_FACTURAR_DISCAPACIDAD.xlsx Facturacion_2026.xlsx --anio 2026 --salida ../datos
 ```
 
-Requiere `openpyxl`. No modifica las planillas: sólo lee.
+Tests del motor de sesiones (sólo biblioteca estándar):
+
+```bash
+cd facturacion/motor
+python3 -m unittest test_sesiones
+```
+
+Validación del motor contra lo que la planilla factura de verdad:
+
+```bash
+cd facturacion/motor
+python3 validar_contra_planilla.py SESIONES_A_FACTURAR_DISCAPACIDAD.xlsx --anio 2026
+```
+
+Los feriados del año, con Pascua calculada:
+
+```bash
+cd facturacion/motor
+python3 feriados.py 2026
+```
+
+`openpyxl` hace falta sólo para los dos scripts que leen planillas. Ninguno las
+modifica: sólo leen.
 
 ## Qué hay hoy en las planillas
 
@@ -45,19 +69,25 @@ sin_factura=104  sin_devengado=443
    (`30590354798` en las 176 filas de SANCOR). Confirma que CUIT y condición frente
    al IVA son atributos de la **obra social**, no del paciente.
 
-2. **El valor por sesión está incrustado en cada fórmula de celda**
+2. **El valor por sesión está incrustado en cada fórmula de celda**, y quedó viejo.
    (`=E2*16753.78`). No existe en ningún lado una tabla de módulos. Por eso cada mes
    arrastra entre dos y cuatro valores distintos y aparecen errores de tipeo que
    nadie puede detectar: `12370,61` vs `12370,16`, `7422,27` vs `7422,37`.
 
-   Separados por módulo, los cuatro quedan así:
+   El valor correcto no sale de las fórmulas sino del campo **Monto** de la planilla
+   de facturación, dividido por la cantidad de sesiones. Así quedan los cuatro módulos:
 
-   | Módulo | Enero | Febrero a julio | Agosto y septiembre |
-   | --- | --- | --- | --- |
-   | APE (general) | 16.753,78 | 16.753,78 y 17.722,15 a la vez ⚠️ | 20.550,64 |
-   | CAMI | 10.052,27 | 10.052,27 | 13.756,00 |
-   | OSPEDYC | 16.753,78 | 17.722,15 | 18.081,68 |
-   | OSPIA | 16.753,78 | 17.722,15 | 20.550,64 |
+   | Módulo | Ene | Feb | Mar | Abr | May | Jun | Jul | Ago | Sep |
+   | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+   | APE | 16.753,78 | 17.722,15 | 18.236,09 | 18.856,10 | 19.346,37 | 19.752,65 | 20.127,95 | 20.550,64 | 20.900,00 |
+   | CAMI | 10.052,27 | 10.052,27 | 10.052,27 | 13.500,00 | 13.500,00 | 13.500,00 | 13.756,00 | 13.756,00 | s/d |
+   | OSPEDYC | 14.740,98 | 15.593,00 | 16.045,20 | 16.590,74 | 17.022,10 | 17.379,56 | 17.709,77 | 18.081,68 | s/d |
+   | OSPIA | s/d | s/d | s/d | s/d | s/d | 19.752,65 | 20.127,95 | ⚠️ | s/d |
+
+   APE se actualiza todos los meses; CAMI, que siempre tiene valor propio, se mueve por
+   escalones. **Las fórmulas de la planilla de sesiones quedaron en el valor de enero**,
+   así que el devengado quedó 11.821.607,76 por debajo de lo facturado en nueve meses.
+   Las facturas salieron bien; lo que se perdió es poder usar esa planilla como control.
 
 3. **La cantidad de sesiones del mes es calculable, no es un dato.** Verificado
    contra enero 2026: el mes tiene 22 días hábiles y el 1º (jueves) es feriado.
@@ -114,6 +144,13 @@ sin_factura=104  sin_devengado=443
 
 9. **El DNI y el CUIL de los pacientes no existen en ninguna de las dos planillas.**
    Los carga el usuario al dar de alta a cada paciente.
+
+10. **Los días autorizados por semana (`Hoja5`) también están viejos.** Al correr el
+    motor contra los 414 meses-paciente facturados de 2026, 110 facturan **más**
+    sesiones de las que permiten sus días autorizados: hay pacientes con 2 días en la
+    hoja que facturan 20. La hoja misma lo insinúa, con anotaciones como "se habían
+    pedido 5" y "esperando autorización". Es el dato que hay que reconfirmar paciente
+    por paciente antes de migrar.
 
 ## Datos personales
 

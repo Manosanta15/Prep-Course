@@ -36,15 +36,21 @@ PREFIJOS_CUIT = {
 MODULOS = ["APE", "CAMI", "OSPEDYC", "OSPIA"]
 
 
-def deducir_modulo(obra_social, prefijo):
-    """Devuelve el codigo de modulo de una fila de la planilla de sesiones."""
+def deducir_modulo(obra_social, prefijo=None):
+    """Devuelve el codigo de modulo de una fila.
+
+    CAMI tiene valor propio todo el año, siempre distinto del APE general.
+    Dentro de CAMI, el prefijo APE marca los pacientes que van al modulo
+    general en lugar del de CAMI.
+    """
     os_norm = normalizar(obra_social)
     for codigo in ("OSPEDYC", "OSPIA"):
         if codigo in os_norm:
             return codigo
-    if os_norm == "CAMI":
-        # Dentro de CAMI, el prefijo APE marca las filas que van al modulo general.
+    if os_norm.startswith("CAMI") and "CAMIONEROS" not in os_norm:
         return "APE" if prefijo == "APE" else "CAMI"
+    if os_norm.startswith("APROSS"):
+        return None
     return "APE"
 
 
@@ -220,6 +226,25 @@ def leer_sesiones(ruta, anio):
             })
 
     return devengado, valores_modulo, valores_por_modulo, cuits_os
+
+
+def valores_desde_facturas(facturas):
+    """Deduce el valor por sesion de cada modulo dividiendo Monto / Cant. Sesiones.
+
+    Esta es la fuente correcta: el Monto de la planilla de facturacion es lo que
+    realmente se facturo. Las formulas de la planilla de sesiones quedaron
+    clavadas en el valor de meses anteriores, asi que no sirven para esto.
+    """
+    deducidos = defaultdict(lambda: defaultdict(Counter))
+    for f in facturas:
+        modulo = deducir_modulo(f["obra_social"])
+        if not modulo:
+            continue
+        ses, monto = f["sesiones"], f["monto"]
+        if not ses or not monto:
+            continue
+        deducidos[modulo][f["mes"]][round(monto / ses, 2)] += 1
+    return deducidos
 
 
 def leer_hoja_simple(ruta, hoja, columnas):
@@ -400,8 +425,8 @@ def consolidar_pacientes(devengado, semanales, topes, condiciones):
 # --------------------------------------------------------------------------
 
 def escribir_informe(ruta, anio, pacientes, valores_modulo, valores_por_modulo,
-                     cuits_os, cruces, dudosos, sin_factura, sin_devengado,
-                     cierres_apross):
+                     valores_facturados, cuits_os, cruces, dudosos, sin_factura,
+                     sin_devengado, cierres_apross):
     L = [f"# Informe de conciliacion {anio}", ""]
     L.append(f"- Pacientes consolidados: **{len(pacientes)}**")
     L.append(f"- Cruces automaticos (devengado <-> factura): **{len(cruces)}**")
@@ -440,6 +465,43 @@ def escribir_informe(ruta, anio, pacientes, valores_modulo, valores_por_modulo,
                 celdas.append(f"{cnt.most_common(1)[0][0]:,.2f}{marca}")
         L.append(f"| {codigo} | " + " | ".join(celdas) + " |")
     L += ["", "`!` = el modulo tiene mas de un valor ese mes.", ""]
+
+    L += ["## Valor por sesion segun los montos facturados", "",
+          "Deducido como Monto / Cant. Sesiones sobre la planilla de facturacion,",
+          "que es lo que realmente se facturo. El valor mas frecuente de cada mes.", "",
+          "| Modulo | " + " | ".join(MESES[m - 1].title()[:3]
+                                     for m in sorted(valores_modulo)) + " |",
+          "| --- |" + " --- |" * len(valores_modulo)]
+    for codigo in MODULOS:
+        if codigo not in valores_facturados:
+            continue
+        celdas = []
+        for mes in sorted(valores_modulo):
+            cnt = valores_facturados[codigo].get(mes)
+            celdas.append(f"{cnt.most_common(1)[0][0]:,.2f}" if cnt else "--")
+        L.append(f"| {codigo} | " + " | ".join(celdas) + " |")
+    L.append("")
+
+    # Desfasaje entre lo que la planilla de sesiones calcula y lo facturado.
+    filas_desf = []
+    for mes in sorted(valores_modulo):
+        for codigo in MODULOS:
+            formula = valores_por_modulo.get(codigo, {}).get(mes)
+            facturado = valores_facturados.get(codigo, {}).get(mes)
+            if not formula or not facturado:
+                continue
+            vf = formula.most_common(1)[0][0]
+            vr = facturado.most_common(1)[0][0]
+            if abs(vf - vr) > 1:
+                filas_desf.append(
+                    f"| {MESES[mes - 1].title()} | {codigo} | {vf:,.2f} "
+                    f"| {vr:,.2f} | {vr - vf:+,.2f} |")
+    if filas_desf:
+        L += ["### Desfasaje entre las dos planillas", "",
+              "Donde el valor incrustado en las formulas de la planilla de sesiones",
+              "no coincide con el que se uso al facturar. Manda el facturado.", "",
+              "| Mes | Modulo | En la formula | Facturado | Diferencia |",
+              "| --- | --- | --- | --- | --- |"] + filas_desf + [""]
 
     L += ["## CUIT por obra social", "",
           "La columna rotulada *CUIL* contiene en realidad el CUIT de la obra social.", "",
@@ -500,6 +562,7 @@ def main():
     condiciones = leer_hoja_simple(args.sesiones, "CUIT", {
         "paciente": 0, "cuit": 1, "condicion": 2})
 
+    valores_facturados = valores_desde_facturas(facturas)
     pacientes = consolidar_pacientes(devengado, semanales, topes, condiciones)
     cruces, dudosos, sin_factura, sin_devengado = fusionar(devengado, facturas)
 
@@ -518,9 +581,14 @@ def main():
         },
         "modulos": [
             {"codigo": codigo,
+             # Lo que dicen las formulas de la planilla de sesiones.
              "valores_por_mes": {
                  str(mes): [{"valor": v, "filas": n} for v, n in cnt.most_common()]
-                 for mes, cnt in sorted(valores_por_modulo[codigo].items())}}
+                 for mes, cnt in sorted(valores_por_modulo[codigo].items())},
+             # Lo que realmente se facturo: esta es la serie a cargar.
+             "valores_facturados_por_mes": {
+                 str(mes): cnt.most_common(1)[0][0]
+                 for mes, cnt in sorted(valores_facturados.get(codigo, {}).items())}}
             for codigo in MODULOS if codigo in valores_por_modulo
         ],
         "pacientes": pacientes,
@@ -550,8 +618,8 @@ def main():
     (salida / "seed.json").write_text(
         json.dumps(seed, ensure_ascii=False, indent=2), encoding="utf-8")
     escribir_informe(salida / "informe.md", args.anio, pacientes, valores_modulo,
-                     valores_por_modulo, cuits_os, cruces, dudosos, sin_factura,
-                     sin_devengado, cierres_apross)
+                     valores_por_modulo, valores_facturados, cuits_os, cruces,
+                     dudosos, sin_factura, sin_devengado, cierres_apross)
 
     print(f"pacientes={len(pacientes)} devengado={len(devengado)} "
           f"facturas={len(facturas)} cruces={len(cruces)} dudosos={len(dudosos)} "
