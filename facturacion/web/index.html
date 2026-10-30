@@ -1,0 +1,1174 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Facturación de sesiones</title>
+<style>
+/* Layout: barra fija arriba con el periodo y la fecha de consulta; debajo una
+   sola columna de ancho completo, porque todo son tablas densas. */
+:root {
+  --bg: #f6f7f8;
+  --panel: #ffffff;
+  --panel-2: #f0f2f4;
+  --borde: #d4dade;
+  --borde-fuerte: #b3bcc2;
+  --fg: #1b2227;
+  --fg-suave: #5c686f;
+  --fg-tenue: #87959d;
+  --acento: #0f6d7e;
+  --acento-fg: #ffffff;
+  --acento-suave: #e2eff1;
+
+  /* Semanticos: son los colores del semaforo, aparte del acento. */
+  --verde: #1f7a44;      --verde-bg: #e3f3e9;
+  --azul: #1b5fa8;       --azul-bg: #e3edf9;
+  --amarillo: #8a6400;   --amarillo-bg: #faf0d4;
+  --rojo: #a52a2a;       --rojo-bg: #fae6e6;
+  --gris: #6b7780;       --gris-bg: #eceff1;
+
+  --radio: 6px;
+  --fuente: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+            "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+          "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14191c; --panel: #1c2327; --panel-2: #232c31;
+    --borde: #313c42; --borde-fuerte: #46545c;
+    --fg: #e6ebee; --fg-suave: #a8b4bb; --fg-tenue: #7d8a92;
+    --acento: #4fb3c4; --acento-fg: #0b1316; --acento-suave: #1d343a;
+    --verde: #6ddc9b;    --verde-bg: #15301f;
+    --azul: #7fb6f0;     --azul-bg: #152638;
+    --amarillo: #e3bd57; --amarillo-bg: #302612;
+    --rojo: #f08a8a;     --rojo-bg: #351a1a;
+    --gris: #93a0a8;     --gris-bg: #262f34;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14191c; --panel: #1c2327; --panel-2: #232c31;
+  --borde: #313c42; --borde-fuerte: #46545c;
+  --fg: #e6ebee; --fg-suave: #a8b4bb; --fg-tenue: #7d8a92;
+  --acento: #4fb3c4; --acento-fg: #0b1316; --acento-suave: #1d343a;
+  --verde: #6ddc9b;    --verde-bg: #15301f;
+  --azul: #7fb6f0;     --azul-bg: #152638;
+  --amarillo: #e3bd57; --amarillo-bg: #302612;
+  --rojo: #f08a8a;     --rojo-bg: #351a1a;
+  --gris: #93a0a8;     --gris-bg: #262f34;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 14px/1.5 var(--fuente);
+  -webkit-text-size-adjust: 100%;
+}
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+h1 { font-size: 1.05rem; font-weight: 650; letter-spacing: -0.01em; }
+h2 { font-size: 0.95rem; font-weight: 650; }
+h3 { font-size: 0.82rem; font-weight: 650; text-transform: uppercase;
+     letter-spacing: 0.06em; color: var(--fg-suave); }
+
+/* ---------- barra superior ---------- */
+header {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--panel); border-bottom: 1px solid var(--borde);
+}
+.barra {
+  display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center;
+  padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.barra .crece { flex: 1 1 auto; min-width: 0; }
+.campo { display: flex; align-items: center; gap: 6px; }
+.campo label { font-size: 0.78rem; color: var(--fg-suave); white-space: nowrap; }
+
+nav {
+  display: flex; gap: 2px; overflow-x: auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+nav button {
+  background: none; border: 0; border-bottom: 2px solid transparent;
+  color: var(--fg-suave); font: inherit; font-size: 0.86rem;
+  padding: 8px 12px; cursor: pointer; white-space: nowrap;
+}
+nav button:hover { color: var(--fg); }
+nav button[aria-current="true"] { color: var(--acento); border-bottom-color: var(--acento); font-weight: 600; }
+
+main {
+  padding-block: 18px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 18px;
+}
+
+/* ---------- controles ---------- */
+input, select, button, textarea { font: inherit; color: var(--fg); }
+input[type="text"], input[type="number"], input[type="date"], select, textarea {
+  background: var(--panel); border: 1px solid var(--borde);
+  border-radius: var(--radio); padding: 5px 8px; min-width: 0;
+}
+input:focus-visible, select:focus-visible, button:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--acento); outline-offset: 1px;
+}
+.btn {
+  background: var(--panel); border: 1px solid var(--borde-fuerte);
+  border-radius: var(--radio); padding: 5px 11px; cursor: pointer;
+  font-size: 0.86rem; white-space: nowrap;
+}
+.btn:hover:not(:disabled) { background: var(--panel-2); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.primario { background: var(--acento); color: var(--acento-fg); border-color: var(--acento); }
+.btn.primario:hover:not(:disabled) { filter: brightness(1.08); }
+.btn.riesgo { color: var(--rojo); border-color: var(--rojo); background: var(--panel); }
+.btn.chico { padding: 3px 8px; font-size: 0.8rem; }
+
+/* ---------- paneles y tablas ---------- */
+.panel {
+  background: var(--panel); border: 1px solid var(--borde);
+  border-radius: var(--radio); overflow: hidden;
+}
+.panel > .cabecera {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline;
+  justify-content: space-between; padding: 11px 14px;
+  border-bottom: 1px solid var(--borde); background: var(--panel-2);
+}
+.panel > .cuerpo { padding: 14px; }
+.scroll { overflow-x: auto; }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--borde);
+         white-space: nowrap; }
+thead th {
+  position: sticky; top: 0; background: var(--panel-2); z-index: 1;
+  font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--fg-suave); font-weight: 600;
+}
+tbody tr:hover { background: var(--panel-2); }
+tbody tr:last-child td { border-bottom: 0; }
+.num { text-align: right; font-variant-numeric: tabular-nums;
+       font-family: var(--mono); font-size: 0.82rem; }
+tfoot td { font-weight: 650; background: var(--panel-2); border-top: 2px solid var(--borde-fuerte); }
+caption { caption-side: bottom; padding: 10px 14px; color: var(--fg-tenue);
+          font-size: 0.78rem; text-align: left; }
+
+/* ---------- chips de estado: color + texto, nunca color solo ---------- */
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  border-radius: 999px; padding: 2px 9px;
+  font-size: 0.76rem; font-weight: 600; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 2px;
+                background: currentColor; flex: none; }
+.chip.verde    { color: var(--verde);    background: var(--verde-bg);    border-color: var(--verde); }
+.chip.azul     { color: var(--azul);     background: var(--azul-bg);     border-color: var(--azul); }
+.chip.amarillo { color: var(--amarillo); background: var(--amarillo-bg); border-color: var(--amarillo); }
+.chip.rojo     { color: var(--rojo);     background: var(--rojo-bg);     border-color: var(--rojo); }
+.chip.gris     { color: var(--gris);     background: var(--gris-bg);     border-color: var(--gris); }
+
+/* celda del tablero anual */
+.celda { display: block; border-radius: 4px; padding: 4px 6px;
+         font-variant-numeric: tabular-nums; font-family: var(--mono);
+         font-size: 0.76rem; text-align: right; border: 1px solid transparent; }
+.celda.verde    { color: var(--verde);    background: var(--verde-bg);    border-color: var(--verde); }
+.celda.azul     { color: var(--azul);     background: var(--azul-bg);     border-color: var(--azul); }
+.celda.amarillo { color: var(--amarillo); background: var(--amarillo-bg); border-color: var(--amarillo); }
+.celda.rojo     { color: var(--rojo);     background: var(--rojo-bg);     border-color: var(--rojo); }
+.celda.vacia    { color: var(--fg-tenue); text-align: center; }
+
+/* ---------- cuadro de montos ---------- */
+.montos { display: grid; gap: 1px; background: var(--borde);
+          grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.monto { background: var(--panel); padding: 12px 14px; display: flex;
+         flex-direction: column; gap: 3px; }
+.monto .rotulo { font-size: 0.74rem; text-transform: uppercase;
+                 letter-spacing: 0.05em; color: var(--fg-suave); }
+.monto .valor { font-family: var(--mono); font-variant-numeric: tabular-nums;
+                font-size: 1.12rem; font-weight: 650; }
+.monto .pie { font-size: 0.75rem; color: var(--fg-tenue); }
+.monto.v .valor { color: var(--verde); }
+.monto.a .valor { color: var(--azul); }
+.monto.m .valor { color: var(--amarillo); }
+.monto.r .valor { color: var(--rojo); }
+
+/* ---------- avisos ---------- */
+.aviso { display: flex; gap: 8px; align-items: flex-start;
+         border-radius: var(--radio); padding: 9px 12px; font-size: 0.84rem;
+         border: 1px solid var(--amarillo); background: var(--amarillo-bg);
+         color: var(--amarillo); }
+.aviso.error { border-color: var(--rojo); background: var(--rojo-bg); color: var(--rojo); }
+.aviso.ok { border-color: var(--verde); background: var(--verde-bg); color: var(--verde); }
+.nota { color: var(--fg-tenue); font-size: 0.8rem; }
+.tenue { color: var(--fg-tenue); }
+
+.acciones { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+/* La columna de acciones queda a la vista aunque la tabla scrollee.
+   Solo en esta tabla: en el tablero taparia los meses. */
+.t-facturacion th.acc,
+.t-facturacion tbody td:last-child {
+  position: sticky; right: 0; background: var(--panel);
+  box-shadow: -1px 0 0 var(--borde);
+}
+.t-facturacion thead th.acc { background: var(--panel-2); }
+.t-facturacion tbody tr:hover td:last-child { background: var(--panel-2); }
+
+/* explicacion de la cantidad de sesiones */
+.porque { background: none; border: 0; padding: 0 0 0 4px; cursor: help;
+          color: var(--acento); font-size: 0.78rem; }
+
+/* ---------- dialogo de confirmacion ---------- */
+dialog {
+  border: 1px solid var(--borde-fuerte); border-radius: 8px; padding: 0;
+  background: var(--panel); color: var(--fg);
+  max-width: min(540px, calc(100vw - 32px)); width: 100%;
+}
+dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+dialog .cabecera { padding: 13px 16px; border-bottom: 1px solid var(--borde);
+                   display: flex; gap: 10px; align-items: center; }
+dialog .cuerpo { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+dialog .pie { padding: 12px 16px; border-top: 1px solid var(--borde);
+              display: flex; gap: 8px; justify-content: flex-end;
+              background: var(--panel-2); flex-wrap: wrap; }
+dialog p { margin: 0; }
+.nivel { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+         font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+.nivel-2 { color: var(--amarillo); background: var(--amarillo-bg); }
+.nivel-3 { color: var(--rojo); background: var(--rojo-bg); }
+
+.toast {
+  position: fixed; z-index: 50;
+  left: max(16px, env(safe-area-inset-left, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  background: var(--fg); color: var(--bg);
+  padding: 10px 14px; border-radius: var(--radio); font-size: 0.86rem;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.25); max-width: 420px;
+}
+
+.grilla { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.fila { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.campo-v { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.campo-v label { font-size: 0.76rem; color: var(--fg-suave); }
+.dias { display: flex; flex-wrap: wrap; gap: 8px; }
+.dia { display: flex; align-items: center; gap: 5px; border: 1px solid var(--borde);
+       border-radius: var(--radio); padding: 5px 8px; }
+.dia input[type="time"] { border: 0; background: none; width: 80px; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="barra">
+    <h1 class="crece">Facturación de sesiones</h1>
+    <div class="campo">
+      <label for="anio">Año</label>
+      <select id="anio"></select>
+    </div>
+    <div class="campo">
+      <label for="hoy">Ver al día</label>
+      <input type="date" id="hoy">
+      <button class="btn chico" id="hoy-reset" title="Volver a la fecha de hoy">hoy</button>
+    </div>
+  </div>
+  <nav id="tabs">
+    <button data-vista="facturacion" aria-current="true">Facturación del mes</button>
+    <button data-vista="tablero">Tablero anual</button>
+    <button data-vista="pacientes">Pacientes</button>
+    <button data-vista="apross">APROSS</button>
+    <button data-vista="configuracion">Configuración</button>
+  </nav>
+</header>
+
+<main id="main"></main>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlg-form">
+    <div class="cabecera">
+      <span class="nivel" id="dlg-nivel"></span>
+      <strong id="dlg-titulo"></strong>
+    </div>
+    <div class="cuerpo">
+      <p id="dlg-detalle"></p>
+      <div class="campo-v" id="dlg-escribir-caja" hidden>
+        <label for="dlg-escribir">Escribí <code id="dlg-esperado"></code> para confirmar</label>
+        <input type="text" id="dlg-escribir" autocomplete="off">
+      </div>
+    </div>
+    <div class="pie">
+      <button class="btn" value="cancelar" type="submit">Cancelar</button>
+      <button class="btn primario" value="ok" type="submit" id="dlg-ok">Confirmar</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+"use strict";
+
+const estado = {
+  vista: "facturacion",
+  anio: new Date().getFullYear(),
+  mes: new Date().getMonth() + 1,
+  hoy: "",
+  config: null,
+  pacienteAbierto: null,
+};
+
+const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+               "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+const MES_CORTO = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago",
+                   "sep", "oct", "nov", "dic"];
+const DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes"];
+const ESTADOS = { COBRADO: "Cobrado", PARCIAL: "Parcial", PENDIENTE: "Pendiente",
+                  ATRASADO: "Atrasado", SIN_FACTURAR: "Sin facturar",
+                  ANULADA: "Anulada", SIN_AUTORIZACION: "Sin autorización" };
+
+const pesos = new Intl.NumberFormat("es-AR",
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const $ = (sel) => document.querySelector(sel);
+const el = (tag, props = {}, hijos = []) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") n.className = v;
+    else if (k === "text") n.textContent = v;
+    else if (k === "html") n.innerHTML = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v === true) n.setAttribute(k, "");
+    else if (v !== false && v != null) n.setAttribute(k, v);
+  }
+  for (const h of [].concat(hijos)) if (h) n.append(h);
+  return n;
+};
+const plata = (v) => (v == null ? "—" : pesos.format(v));
+
+// ---------- API ----------
+function qs(extra = {}) {
+  const p = new URLSearchParams({ anio: estado.anio, ...extra });
+  if (estado.hoy) p.set("hoy", estado.hoy);
+  return p.toString();
+}
+async function get(ruta, extra) {
+  const r = await fetch(`${ruta}?${qs(extra)}`);
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || "Error al consultar");
+  return d;
+}
+async function post(ruta, cuerpo) {
+  const r = await fetch(ruta, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cuerpo),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || "Error al guardar");
+  return d;
+}
+
+// ---------- avisos ----------
+let tiempoToast;
+function toast(texto, clase = "") {
+  document.querySelector(".toast")?.remove();
+  const t = el("div", { class: `toast ${clase}`, text: texto, role: "status" });
+  document.body.append(t);
+  clearTimeout(tiempoToast);
+  tiempoToast = setTimeout(() => t.remove(), 4200);
+}
+
+/* Toda modificacion pasa por aca. El nivel y el texto los calcula el servidor:
+   la pantalla solo los muestra. Nivel 3 obliga a escribir algo para confirmar. */
+function confirmar(c) {
+  return new Promise((resolve) => {
+    const dlg = $("#dlg");
+    const nivel = $("#dlg-nivel");
+    nivel.textContent = c.nivel === 3 ? "Confirmación" : "Revisar";
+    nivel.className = `nivel nivel-${c.nivel === 3 ? 3 : 2}`;
+    $("#dlg-titulo").textContent = c.titulo;
+    $("#dlg-detalle").textContent = (c.detalle || []).join(" ");
+
+    const pideTexto = c.nivel === 3 && c.texto_a_escribir;
+    const caja = $("#dlg-escribir-caja");
+    const campo = $("#dlg-escribir");
+    const ok = $("#dlg-ok");
+    caja.hidden = !pideTexto;
+    campo.value = "";
+    $("#dlg-esperado").textContent = c.texto_a_escribir || "";
+    ok.disabled = !!pideTexto;
+    ok.className = `btn ${c.nivel === 3 ? "riesgo" : "primario"}`;
+    ok.textContent = c.nivel === 3 ? "Sí, confirmar" : "Confirmar";
+
+    const alEscribir = () => {
+      ok.disabled = campo.value.trim() !== String(c.texto_a_escribir).trim();
+    };
+    campo.addEventListener("input", alEscribir);
+
+    dlg.addEventListener("close", function cerrado() {
+      dlg.removeEventListener("close", cerrado);
+      campo.removeEventListener("input", alEscribir);
+      resolve(dlg.returnValue === "ok");
+    });
+    dlg.showModal();
+    if (pideTexto) campo.focus();
+  });
+}
+
+async function accion(fn) {
+  try { await fn(); }
+  catch (e) { toast(e.message, "error"); }
+}
+
+// ---------- vista: facturacion del mes ----------
+async function vistaFacturacion(main) {
+  const d = await get(`/api/facturacion/${estado.anio}/${estado.mes}`);
+
+  const selMes = el("select", {
+    id: "mes",
+    onchange: (e) => { estado.mes = +e.target.value; render(); },
+  });
+  MESES.forEach((m, i) => selMes.append(
+    el("option", { value: i + 1, text: m, selected: i + 1 === estado.mes })));
+
+  // La fecha de emision se elige una vez para todo el mes: en la practica se
+  // emite todo el mismo dia, y repetirla en cada fila no aporta nada.
+  const fechaEmision = el("input", {
+    type: "date", id: "fecha-emision", value: estado.hoy || d.hoy,
+    style: "width:150px",
+  });
+
+  const tbody = el("tbody");
+  let totalMes = 0;
+
+  for (const f of d.filas) {
+    const emitida = !!f.factura_id && f.estado !== "SIN_FACTURAR";
+    if (emitida) totalMes += f.monto || 0;
+
+    const acciones = el("div", { class: "acciones" });
+    if (!emitida) {
+      const nro = el("input", {
+        type: "text", placeholder: "N° factura", style: "width:86px",
+        id: `nro-${f.paciente_id}`, "aria-label": `Número de factura de ${f.paciente}`,
+      });
+      const emitir = () => accion(async () => {
+        if (!nro.value.trim()) { toast("Falta el número de factura", "error"); return; }
+        await post("/api/factura/emitir", {
+          paciente_id: f.paciente_id, anio: estado.anio, mes: estado.mes,
+          nro_factura: nro.value.trim(), fecha_emision: fechaEmision.value,
+        });
+        toast(`Factura ${nro.value.trim()} emitida por ${plata(f.monto)}`, "ok");
+        render();
+      });
+      nro.addEventListener("keydown", (e) => { if (e.key === "Enter") emitir(); });
+      acciones.append(nro, el("button", {
+        class: "btn primario chico", text: "Emitir",
+        disabled: !f.sesiones || f.valor_sesion == null,
+        onclick: emitir,
+      }));
+    } else {
+      if (f.estado !== "COBRADO") {
+        acciones.append(el("button", {
+          class: "btn chico", text: "Registrar pago",
+          onclick: () => dialogoPago(f),
+        }));
+      }
+      acciones.append(el("button", {
+        class: "btn chico riesgo", text: "Anular",
+        onclick: () => accion(async () => {
+          const c = await post("/api/confirmar/anulacion", { factura_id: f.factura_id });
+          if (!await confirmar(c)) return;
+          const r = await post("/api/factura/anular", {
+            factura_id: f.factura_id, motivo: "corrección desde la pantalla",
+            fecha: estado.hoy || d.hoy,
+          });
+          toast(r.reversiones
+            ? `Factura anulada y ${r.reversiones} pago(s) revertido(s)`
+            : "Factura anulada", "ok");
+          render();
+        }),
+      }));
+    }
+
+    const celdaSesiones = el("td", { class: "num" }, [
+      el("span", { text: String(f.sesiones) }),
+      el("button", {
+        class: "porque", text: "ⓘ", type: "button",
+        title: f.explicacion, "aria-label": `Por qué ${f.sesiones} sesiones`,
+        onclick: () => toast(f.explicacion),
+      }),
+    ]);
+
+    tbody.append(el("tr", {}, [
+      el("td", {}, [
+        el("a", {
+          href: "#", text: f.paciente,
+          style: "color:var(--acento);text-decoration:none",
+          onclick: (e) => { e.preventDefault(); abrirPaciente(f.paciente_id); },
+        }),
+        f.aviso && !f.aviso.startsWith("Falta el valor")
+          ? el("div", { class: "nota", text: f.aviso }) : null,
+      ]),
+      el("td", { text: f.obra_social }),
+      el("td", { class: "tenue", text: f.profesional || "—" }),
+      el("td", { text: f.modulo }),
+      celdaSesiones,
+      el("td", { class: "num", text: f.valor_sesion == null ? "—" : plata(f.valor_sesion) }),
+      el("td", { class: "num", text: plata(f.monto) }),
+      el("td", { class: "tenue", text: f.nro_factura || "—" }),
+      el("td", {}, [chip(f.estado, f.color, f)]),
+      el("td", {}, [acciones]),
+    ]));
+  }
+
+  // Si falta el valor de algun modulo, se dice una vez y no en cada fila.
+  const faltantes = [...new Set(d.filas
+    .filter((f) => f.valor_sesion == null)
+    .map((f) => f.modulo))];
+  if (faltantes.length) {
+    main.append(el("div", { class: "aviso" }, [el("span", { text:
+      `Falta el valor de ${faltantes.join(", ")} para ${MESES[estado.mes - 1]} ` +
+      `de ${estado.anio}. Cargalo en Configuración → Valores por módulo; ` +
+      `hasta entonces no se puede emitir, y el sistema no arrastra el del mes anterior.` })]));
+  }
+
+  main.append(
+    el("div", { class: "panel" }, [
+      el("div", { class: "cabecera" }, [
+        el("div", { class: "fila" }, [
+          el("h2", { text: "Facturación de" }), selMes,
+          el("span", { class: "nota", text: `${d.filas.length} pacientes` }),
+          el("span", { class: "nota", text: "· emitir con fecha" }), fechaEmision,
+        ]),
+        el("div", { class: "num", style: "font-size:0.95rem" },
+          [el("span", { class: "nota", text: "emitido este mes " }),
+           el("strong", { text: plata(totalMes) })]),
+      ]),
+      el("div", { class: "scroll" }, [
+        el("table", { class: "t-facturacion" }, [
+          el("thead", {}, [el("tr", {}, [
+            el("th", { text: "Paciente" }), el("th", { text: "Obra social" }),
+            el("th", { text: "Profesional" }), el("th", { text: "Módulo" }),
+            el("th", { class: "num", text: "Sesiones" }),
+            el("th", { class: "num", text: "Valor" }),
+            el("th", { class: "num", text: "Monto" }),
+            el("th", { text: "N° factura" }), el("th", { text: "Estado" }),
+            el("th", { class: "acc", text: "Acción" }),
+          ])]),
+          tbody,
+          el("caption", { text: "La ⓘ al lado de la cantidad explica de dónde sale ese número: qué fechas se cuentan y cuáles no." }),
+        ]),
+      ]),
+    ]));
+}
+
+function chip(estadoTxt, color, f) {
+  const texto = ESTADOS[estadoTxt] || estadoTxt;
+  const extra = estadoTxt === "PARCIAL" && f?.saldo != null
+    ? ` · saldo ${plata(f.saldo)}`
+    : (estadoTxt === "ATRASADO" && f?.dias != null ? ` · ${f.dias} días` : "");
+  return el("span", { class: `chip ${color}`, text: texto + extra });
+}
+
+function dialogoPago(f) {
+  accion(async () => {
+    const pagos = await get(`/api/factura/${f.factura_id}/pagos`);
+    const dlg = $("#dlg");
+    $("#dlg-nivel").textContent = "Pago";
+    $("#dlg-nivel").className = "nivel nivel-2";
+    $("#dlg-titulo").textContent = `Registrar pago · ${f.paciente}`;
+    $("#dlg-detalle").textContent =
+      `Factura ${f.nro_factura} por ${plata(f.monto)}. ` +
+      (pagos.length ? `Ya cobrado ${plata(f.cobrado)}; saldo ${plata(f.saldo)}.`
+                    : "Sin pagos registrados.");
+
+    const caja = $("#dlg-escribir-caja");
+    caja.hidden = false;
+    caja.replaceChildren(
+      el("div", { class: "grilla" }, [
+        campoV("Fecha de pago", el("input", { type: "date", id: "p-fecha",
+          value: estado.hoy || new Date().toISOString().slice(0, 10) })),
+        campoV("Monto", el("input", { type: "number", id: "p-monto", step: "0.01",
+          value: f.saldo.toFixed(2) })),
+        campoV("Medio de pago", (() => {
+          const s = el("select", { id: "p-medio" });
+          ["DEPOSITO", "TRANSFERENCIA", "CHEQUE", "EFECTIVO"].forEach((m) =>
+            s.append(el("option", { value: m, text: m.toLowerCase() })));
+          return s;
+        })()),
+        campoV("Observaciones", el("input", { type: "text", id: "p-obs" })),
+      ]));
+
+    const ok = $("#dlg-ok");
+    ok.disabled = false;
+    ok.className = "btn primario";
+    ok.textContent = "Registrar pago";
+
+    dlg.addEventListener("close", function cerrado() {
+      dlg.removeEventListener("close", cerrado);
+      const confirmado = dlg.returnValue === "ok";
+      const datos = {
+        factura_id: f.factura_id,
+        fecha_pago: $("#p-fecha")?.value,
+        monto: $("#p-monto")?.value,
+        medio_pago: $("#p-medio")?.value,
+        observaciones: $("#p-obs")?.value || "",
+      };
+      caja.replaceChildren(
+        el("label", { for: "dlg-escribir", html: 'Escribí <code id="dlg-esperado"></code> para confirmar' }),
+        el("input", { type: "text", id: "dlg-escribir", autocomplete: "off" }));
+      caja.hidden = true;
+      if (!confirmado) return;
+      accion(async () => {
+        const r = await post("/api/pago", datos);
+        toast(`Pago de ${plata(r.monto)} registrado`, "ok");
+        render();
+      });
+    });
+    dlg.showModal();
+  });
+}
+
+function campoV(rotulo, control) {
+  return el("div", { class: "campo-v" },
+    [el("label", { text: rotulo, for: control.id }), control]);
+}
+
+// ---------- vista: tablero anual ----------
+async function vistaTablero(main) {
+  const d = await get(`/api/tablero/${estado.anio}`);
+  const r = d.resumen;
+
+  main.append(el("div", { class: "panel" }, [
+    el("div", { class: "cabecera" }, [
+      el("h2", { text: `Cobranza ${d.anio}` }),
+      el("span", { class: "nota", text: `al ${d.hoy}` }),
+    ]),
+    el("div", { class: "montos" }, [
+      monto("Facturado", r.facturado, "", `${total(r.cantidad_por_estado)} facturas`),
+      monto("Cobrado", r.cobrado, "v", etiqueta(r, "COBRADO")),
+      monto("Saldo de parciales", r.parcial_pendiente, "a", etiqueta(r, "PARCIAL")),
+      monto("Pendiente", r.pendiente, "m", etiqueta(r, "PENDIENTE")),
+      monto("Atrasado +60 días", r.atrasado, "r", etiqueta(r, "ATRASADO")),
+      monto("Por cobrar", r.por_cobrar, "", "pendiente + atrasado + saldos"),
+    ]),
+  ]));
+
+  if (!d.pacientes.length) {
+    main.append(el("div", { class: "aviso" },
+      [el("span", { text: `No hay facturas emitidas en ${d.anio}. Emití alguna desde "Facturación del mes".` })]));
+    return;
+  }
+
+  const thead = el("tr", {}, [el("th", { text: "Paciente" })]);
+  MES_CORTO.forEach((m) => thead.append(el("th", { class: "num", text: m })));
+  thead.append(el("th", { class: "num", text: "Total paciente" }));
+
+  const tbody = el("tbody");
+  for (const p of d.pacientes) {
+    const tr = el("tr", {}, [el("td", {}, [el("a", {
+      href: "#", text: p.nombre, style: "color:var(--acento);text-decoration:none",
+      onclick: (e) => { e.preventDefault(); abrirPaciente(p.id); },
+    })])]);
+    for (let m = 1; m <= 12; m++) {
+      const c = p.meses[String(m)];
+      tr.append(el("td", { style: "padding:3px 4px" }, [
+        c ? el("span", {
+              class: `celda ${c.color}`,
+              title: `${ESTADOS[c.estado] || c.estado}` +
+                     (c.nro ? ` · factura ${c.nro}` : "") +
+                     (c.saldo ? ` · saldo ${plata(c.saldo)}` : ""),
+              text: Math.round(c.monto / 1000).toLocaleString("es-AR") + "k",
+            })
+          : el("span", { class: "celda vacia", text: "·" }),
+      ]));
+    }
+    tr.append(el("td", { class: "num", text: plata(p.total) }));
+    tbody.append(tr);
+  }
+
+  const tfoot = el("tr", {}, [el("td", { text: "Total mensual" })]);
+  for (let m = 1; m <= 12; m++) {
+    const v = d.total_por_mes[String(m)];
+    tfoot.append(el("td", { class: "num",
+      text: v ? Math.round(v / 1000).toLocaleString("es-AR") + "k" : "·" }));
+  }
+  tfoot.append(el("td", { class: "num", text: plata(d.total_anual) }));
+
+  main.append(el("div", { class: "panel" }, [
+    el("div", { class: "cabecera" }, [
+      el("h2", { text: "Tablero anual" }),
+      el("div", { class: "fila", style: "gap:6px" },
+        ["verde", "azul", "amarillo", "rojo"].map((c, i) =>
+          el("span", { class: `chip ${c}`,
+            text: ["Cobrado", "Parcial", "Pendiente", "Atrasado"][i] }))),
+    ]),
+    el("div", { class: "scroll" }, [
+      el("table", {}, [
+        el("thead", {}, [thead]), tbody, el("tfoot", {}, [tfoot]),
+        el("caption", { text: "Montos en miles de pesos. El total por paciente y el total anual van completos." }),
+      ]),
+    ]),
+  ]));
+
+  const porProf = Object.entries(d.total_por_profesional)
+    .sort((a, b) => b[1] - a[1]);
+  if (porProf.length) {
+    main.append(el("div", { class: "panel" }, [
+      el("div", { class: "cabecera" }, [el("h2", { text: "Por profesional" })]),
+      el("div", { class: "scroll" }, [el("table", {}, [
+        el("thead", {}, [el("tr", {}, [
+          el("th", { text: "Profesional" }), el("th", { class: "num", text: "Total facturado" })])]),
+        el("tbody", {}, porProf.map(([n, v]) => el("tr", {}, [
+          el("td", { text: n }), el("td", { class: "num", text: plata(v) })]))),
+      ])]),
+    ]));
+  }
+}
+
+const total = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+const etiqueta = (r, e) => {
+  const n = r.cantidad_por_estado[e] || 0;
+  return n ? `${n} factura${n === 1 ? "" : "s"}` : "ninguna";
+};
+function monto(rotulo, valor, clase, pie) {
+  return el("div", { class: `monto ${clase}` }, [
+    el("span", { class: "rotulo", text: rotulo }),
+    el("span", { class: "valor", text: plata(valor) }),
+    pie ? el("span", { class: "pie", text: pie }) : null,
+  ]);
+}
+
+// ---------- vista: pacientes y ficha ----------
+async function vistaPacientes(main) {
+  const lista = await get("/api/pacientes");
+
+  if (estado.pacienteAbierto) {
+    const f = await get(`/api/paciente/${estado.pacienteAbierto}/${estado.anio}`);
+    if (f.paciente) { main.append(fichaPaciente(f)); return; }
+    estado.pacienteAbierto = null;
+  }
+
+  const tbody = el("tbody");
+  for (const p of lista) {
+    tbody.append(el("tr", {}, [
+      el("td", {}, [el("a", {
+        href: "#", text: p.nombre, style: "color:var(--acento);text-decoration:none",
+        onclick: (e) => { e.preventDefault(); abrirPaciente(p.id); },
+      })]),
+      el("td", { text: p.obra_social }),
+      el("td", { text: p.modulo }),
+      el("td", { class: "tenue", text: p.profesional || "—" }),
+      el("td", { class: "num tenue", text: p.dni || "—" }),
+      el("td", { class: "num tenue", text: p.cuil || "—" }),
+      el("td", {}, [p.datos_fiscales_completos
+        ? el("span", { class: "tenue", text: "—" })
+        : el("span", { class: "chip amarillo", text: "Faltan DNI o CUIL" })]),
+    ]));
+  }
+
+  main.append(el("div", { class: "panel" }, [
+    el("div", { class: "cabecera" }, [
+      el("h2", { text: "Pacientes" }),
+      el("span", { class: "nota", text: `${lista.length} activos` }),
+    ]),
+    el("div", { class: "scroll" }, [el("table", {}, [
+      el("thead", {}, [el("tr", {}, [
+        el("th", { text: "Paciente" }), el("th", { text: "Obra social" }),
+        el("th", { text: "Módulo" }), el("th", { text: "Profesional" }),
+        el("th", { class: "num", text: "DNI" }), el("th", { class: "num", text: "CUIL" }),
+        el("th", { text: "" })])]),
+      tbody,
+      el("caption", { text: "El DNI y el CUIL los carga el usuario: no están en las planillas. Falten o no, se puede facturar." }),
+    ])]),
+  ]));
+}
+
+function fichaPaciente(f) {
+  const p = f.paciente;
+  const a = f.autorizacion;
+  const tbody = el("tbody");
+
+  for (const m of f.meses) {
+    if (!m.sesiones && m.estado === "SIN_AUTORIZACION") continue;
+    tbody.append(el("tr", {}, [
+      el("td", { text: MESES[m.mes - 1] }),
+      el("td", { class: "num", text: String(m.sesiones) }),
+      el("td", { class: "num", text: String(m.transcurridas) }),
+      el("td", { class: "num", text: plata(m.monto) }),
+      el("td", {}, [chip(m.estado, m.color, m)]),
+      el("td", { class: "tenue", style: "white-space:normal",
+                 text: m.explicacion || "" }),
+    ]));
+  }
+
+  return el("div", { class: "panel" }, [
+    el("div", { class: "cabecera" }, [
+      el("div", {}, [
+        el("h2", { text: p.nombre }),
+        el("div", { class: "nota", text:
+          `${p.obra_social} · CUIT ${p.cuit_obra_social || "s/d"} · ` +
+          `${p.condicion_iva} · módulo ${p.modulo}` +
+          (p.profesional ? ` · ${p.profesional}` : "") }),
+        el("div", { class: "nota", text:
+          `DNI ${p.dni || "sin cargar"} · CUIL ${p.cuil || "sin cargar"}` }),
+        a ? el("div", { class: "nota", text:
+          "Autorización: " + a.dias.map((d) =>
+            `${d.dia}${d.hora ? " " + d.hora : ""}`).join(" · ") +
+          ` · vigencia ${a.vigencia_desde} a ${a.vigencia_hasta || "sin fin"}` +
+          (a.tope ? ` · tope ${a.tope}` : "") }) : null,
+      ]),
+      el("button", { class: "btn", text: "← Volver",
+        onclick: () => { estado.pacienteAbierto = null; render(); } }),
+    ]),
+    el("div", { class: "cuerpo" }, [
+      p.datos_fiscales_completos ? null : el("div", { class: "aviso" },
+        [el("span", { text: "Faltan el DNI o el CUIL de este paciente. No bloquea la facturación, pero conviene completarlos." })]),
+      el("div", { class: "montos" }, [
+        el("div", { class: "monto" }, [
+          el("span", { class: "rotulo", text: "Sesiones del año" }),
+          el("span", { class: "valor", text: String(f.sesiones_totales) })]),
+        el("div", { class: "monto v" }, [
+          el("span", { class: "rotulo", text: "Transcurridas" }),
+          el("span", { class: "valor", text: String(f.sesiones_transcurridas) }),
+          el("span", { class: "pie", text: `al ${f.al_dia}` })]),
+        el("div", { class: "monto" }, [
+          el("span", { class: "rotulo", text: "Por transcurrir" }),
+          el("span", { class: "valor", text: String(f.sesiones_por_transcurrir) })]),
+      ]),
+    ]),
+    el("div", { class: "scroll" }, [el("table", {}, [
+      el("thead", {}, [el("tr", {}, [
+        el("th", { text: "Mes" }), el("th", { class: "num", text: "Sesiones" }),
+        el("th", { class: "num", text: "Transcurridas" }),
+        el("th", { class: "num", text: "Monto" }), el("th", { text: "Estado" }),
+        el("th", { text: "De dónde sale" })])]),
+      tbody,
+    ])]),
+  ]);
+}
+
+function abrirPaciente(id) {
+  estado.pacienteAbierto = id;
+  estado.vista = "pacientes";
+  render();
+}
+
+// ---------- vista: APROSS ----------
+async function vistaApross(main) {
+  const lista = await get(`/api/apross/${estado.anio}`);
+  const porMes = {};
+  lista.forEach((c) => { porMes[c.mes] = c; });
+  const actual = porMes[estado.mes] || null;
+
+  const selMes = el("select", { id: "ap-mes",
+    onchange: (e) => { estado.mes = +e.target.value; render(); } });
+  MESES.forEach((m, i) => selMes.append(
+    el("option", { value: i + 1, text: m, selected: i + 1 === estado.mes })));
+
+  const cantidad = el("input", { type: "number", id: "ap-sesiones", min: "0",
+    value: actual?.cantidad_sesiones ?? 0 });
+  const valor = el("input", { type: "number", id: "ap-valor", step: "0.01",
+    value: actual?.valor_sesion ?? 0 });
+  const pacientes = el("input", { type: "number", id: "ap-pacientes", min: "0",
+    value: actual?.cantidad_pacientes ?? 31 });
+  const desc = el("input", { type: "number", id: "ap-desc", step: "0.01",
+    value: actual?.porcentaje_descuento ?? 4 });
+  const fecha = el("input", { type: "date", id: "ap-fecha",
+    value: actual?.fecha_pago || "" });
+
+  const salida = {
+    total: el("span", { class: "valor" }), descuento: el("span", { class: "valor" }),
+    abonado: el("span", { class: "valor" }),
+  };
+  function recalcular() {
+    const t = (+cantidad.value || 0) * (+valor.value || 0);
+    const d = t * (+desc.value || 0) / 100;
+    salida.total.textContent = plata(Math.round(t * 100) / 100);
+    salida.descuento.textContent = "-" + plata(Math.round(d * 100) / 100);
+    salida.abonado.textContent = plata(Math.round((t - d) * 100) / 100);
+  }
+  [cantidad, valor, desc].forEach((i) => i.addEventListener("input", recalcular));
+  recalcular();
+
+  main.append(el("div", { class: "panel" }, [
+    el("div", { class: "cabecera" }, [
+      el("div", { class: "fila" }, [el("h2", { text: "Convenio APROSS de" }), selMes]),
+      actual ? el("span", { class: `chip ${actual.estado === "COBRADO" ? "verde" : "gris"}`,
+        text: actual.estado === "COBRADO" ? "Cobrado" : actual.estado }) : null,
+    ]),
+    el("div", { class: "cuerpo" }, [
+      el("p", { class: "nota", text: "APROSS no se factura por paciente: es un convenio con un total mensual y un descuento. El descuento y el importe abonado son calculados, no se editan a mano." }),
+      el("div", { class: "grilla" }, [
+        campoV("Pacientes", pacientes),
+        campoV("Cantidad de sesiones", cantidad),
+        campoV("Valor por sesión", valor),
+        campoV("Descuento %", desc),
+      ]),
+      el("div", { class: "montos", style: "margin-top:4px" }, [
+        el("div", { class: "monto" }, [
+          el("span", { class: "rotulo", text: "Total" }), salida.total]),
+        el("div", { class: "monto r" }, [
+          el("span", { class: "rotulo", text: "Descuento" }), salida.descuento]),
+        el("div", { class: "monto v" }, [
+          el("span", { class: "rotulo", text: "Importe abonado" }), salida.abonado]),
+      ]),
+      el("div", { class: "fila" }, [
+        campoV("Fecha de pago", fecha),
+        el("button", { class: "btn", text: "Guardar borrador",
+          onclick: () => guardarApross("BORRADOR") }),
+        el("button", { class: "btn primario", text: "Cerrar convenio",
+          onclick: () => guardarApross("CERRADO") }),
+      ]),
+    ]),
+  ]));
+
+  function guardarApross(estadoNuevo) {
+    accion(async () => {
+      const datos = {
+        anio: estado.anio, mes: estado.mes,
+        cantidad_pacientes: pacientes.value, cantidad_sesiones: cantidad.value,
+        valor_sesion: valor.value, porcentaje_descuento: desc.value,
+        fecha_pago: fecha.value || null, estado: estadoNuevo,
+      };
+      if (estadoNuevo === "CERRADO") {
+        const t = (+cantidad.value || 0) * (+valor.value || 0);
+        const d = t * (+desc.value || 0) / 100;
+        const ok = await confirmar({
+          nivel: 3,
+          titulo: `Vas a cerrar el convenio APROSS de ${String(estado.mes).padStart(2, "0")}/${estado.anio}.`,
+          detalle: [`Total ${plata(t)}, descuento ${plata(d)}, importe abonado ${plata(t - d)}. Una vez cerrado, para cambiarlo hay que reabrirlo.`],
+          texto_a_escribir: `${String(estado.mes).padStart(2, "0")}/${estado.anio}`,
+        });
+        if (!ok) return;
+      }
+      await post("/api/apross", datos);
+      toast(estadoNuevo === "CERRADO" ? "Convenio cerrado" : "Borrador guardado", "ok");
+      render();
+    });
+  }
+
+  if (lista.length) {
+    main.append(el("div", { class: "panel" }, [
+      el("div", { class: "cabecera" }, [el("h2", { text: `Convenios cargados ${estado.anio}` })]),
+      el("div", { class: "scroll" }, [el("table", {}, [
+        el("thead", {}, [el("tr", {}, [
+          el("th", { text: "Mes" }), el("th", { class: "num", text: "Pacientes" }),
+          el("th", { class: "num", text: "Total" }),
+          el("th", { class: "num", text: "Descuento" }),
+          el("th", { class: "num", text: "Importe abonado" }),
+          el("th", { text: "Fecha de pago" }), el("th", { text: "Estado" })])]),
+        el("tbody", {}, lista.map((c) => el("tr", {}, [
+          el("td", { text: MESES[c.mes - 1] }),
+          el("td", { class: "num", text: String(c.cantidad_pacientes) }),
+          el("td", { class: "num", text: plata(c.total_bruto) }),
+          el("td", { class: "num", text: "-" + plata(c.monto_descuento) }),
+          el("td", { class: "num", text: plata(c.importe_abonado) }),
+          el("td", { class: "tenue", text: c.fecha_pago || "—" }),
+          el("td", {}, [el("span", {
+            class: `chip ${c.estado === "COBRADO" ? "verde" : "gris"}`,
+            text: c.estado === "COBRADO" ? "Cobrado" : c.estado })]),
+        ]))),
+      ])]),
+    ]));
+  }
+}
+
+// ---------- vista: configuracion ----------
+async function vistaConfiguracion(main) {
+  const c = await get("/api/configuracion");
+  estado.config = c;
+
+  // --- valores y topes por modulo: la grilla clave ---
+  const porModulo = {};
+  c.valores.forEach((v) => {
+    (porModulo[v.modulo] ||= {})[v.mes] = v;
+  });
+
+  const thead = el("tr", {}, [el("th", { text: "Módulo" })]);
+  MES_CORTO.forEach((m) => thead.append(el("th", { class: "num", text: m })));
+
+  const tbody = el("tbody");
+  for (const m of c.modulos) {
+    const tr = el("tr", {}, [el("td", {}, [el("strong", { text: m.codigo })])]);
+    for (let mes = 1; mes <= 12; mes++) {
+      const v = porModulo[m.codigo]?.[mes];
+      const input = el("input", {
+        type: "number", step: "0.01", style: "width:92px", value: v?.valor_sesion ?? "",
+        placeholder: "—", "aria-label": `Valor de ${m.codigo} en ${MESES[mes - 1]}`,
+        onchange: (e) => guardarValor(m.codigo, mes, e.target.value, e.target),
+      });
+      tr.append(el("td", { style: "padding:3px 4px" }, [
+        input,
+        v ? null : el("div", { class: "nota", text: "falta" }),
+      ]));
+    }
+    tbody.append(tr);
+  }
+
+  function guardarValor(modulo, mes, valorNuevo, input) {
+    accion(async () => {
+      if (!valorNuevo) return;
+      const conf = await post("/api/confirmar/valor-modulo",
+        { modulo, anio: estado.anio, mes, valor_sesion: valorNuevo });
+      if (!await confirmar(conf)) { render(); return; }
+      await post("/api/valor-modulo",
+        { modulo, anio: estado.anio, mes, valor_sesion: valorNuevo });
+      toast(`${modulo} de ${MESES[mes - 1]} guardado en ${plata(+valorNuevo)}`, "ok");
+      render();
+    });
+  }
+
+  main.append(el("div", { class: "panel" }, [
+    el("div", { class: "cabecera" }, [
+      el("h2", { text: `Valores por módulo · ${estado.anio}` }),
+      el("span", { class: "nota", text: "se actualizan mes a mes" }),
+    ]),
+    el("div", { class: "scroll" }, [el("table", {}, [
+      el("thead", {}, [thead]), tbody,
+      el("caption", { text: "El valor por sesión de cada módulo y cada mes. Si falta el del mes, el sistema no factura y avisa: no arrastra el del mes anterior." }),
+    ])]),
+  ]));
+
+  // --- obras sociales ---
+  main.append(el("div", { class: "panel" }, [
+    el("div", { class: "cabecera" }, [el("h2", { text: "Obras sociales" })]),
+    el("div", { class: "scroll" }, [el("table", {}, [
+      el("thead", {}, [el("tr", {}, [
+        el("th", { text: "Nombre" }), el("th", { class: "num", text: "CUIT" }),
+        el("th", { text: "Condición IVA" }), el("th", { text: "Tope" }),
+        el("th", { class: "num", text: "Días venc." })])]),
+      el("tbody", {}, c.obras_sociales.map((o) => el("tr", {}, [
+        el("td", { text: o.nombre }),
+        el("td", { class: "num", text: o.cuit || "—" }),
+        el("td", { text: o.condicion_iva.replace(/_/g, " ").toLowerCase() }),
+        el("td", {}, [o.tiene_tope
+          ? el("span", { class: "chip gris", text: `${o.tope_sesiones_mes} por mes` })
+          : el("span", { class: "tenue", text: "sin tope" })]),
+        el("td", { class: "num", text: String(o.dias_vencimiento) }),
+      ]))),
+      el("caption", { text: "El tope es sí/no explícito: un tope sin cargar no es un tope de cero. Confirmá con cada obra social antes de cargarlo, porque si cargás uno que no existe el sistema factura de menos." }),
+    ])]),
+  ]));
+
+  // --- feriados ---
+  const nuevoFeriado = el("input", { type: "date", id: "f-fecha" });
+  const descFeriado = el("input", { type: "text", id: "f-desc", placeholder: "descripción" });
+
+  main.append(el("div", { class: "panel" }, [
+    el("div", { class: "cabecera" }, [
+      el("h2", { text: `Feriados ${estado.anio}` }),
+      el("span", { class: "nota", text: `${c.feriados.length} cargados` }),
+    ]),
+    el("div", { class: "cuerpo" }, [
+      el("div", { class: "fila" }, [
+        campoV("Fecha", nuevoFeriado), campoV("Descripción", descFeriado),
+        el("button", { class: "btn primario", text: "Agregar feriado",
+          onclick: () => accion(async () => {
+            if (!nuevoFeriado.value) { toast("Falta la fecha", "error"); return; }
+            const conf = await post("/api/confirmar/feriado",
+              { fecha: nuevoFeriado.value, descripcion: descFeriado.value });
+            if (conf.nivel > 1 && !await confirmar(conf)) return;
+            await post("/api/feriado",
+              { fecha: nuevoFeriado.value, descripcion: descFeriado.value });
+            toast("Feriado agregado", "ok");
+            render();
+          }) }),
+        el("button", { class: "btn", text: "Importar feriados nacionales",
+          onclick: () => accion(async () => {
+            const r = await post("/api/feriados-sugeridos/importar", { anio: estado.anio });
+            toast(`${r.cargados} feriados cargados. Los trasladables hay que confirmarlos.`, "ok");
+            render();
+          }) }),
+      ]),
+    ]),
+    el("div", { class: "scroll" }, [el("table", {}, [
+      el("thead", {}, [el("tr", {}, [
+        el("th", { text: "Fecha" }), el("th", { text: "Día" }),
+        el("th", { text: "Descripción" }), el("th", { text: "" })])]),
+      el("tbody", {}, c.feriados.map((f) => {
+        const d = new Date(f.fecha + "T12:00:00");
+        return el("tr", {}, [
+          el("td", { class: "num", text: f.fecha }),
+          el("td", { class: "tenue", text: DIAS[(d.getDay() + 6) % 7] || "fin de semana" }),
+          el("td", { text: f.descripcion }),
+          el("td", {}, [el("button", { class: "btn chico riesgo", text: "Quitar",
+            onclick: () => accion(async () => {
+              await post("/api/feriado/borrar", { fecha: f.fecha });
+              toast("Feriado quitado", "ok");
+              render();
+            }) })]),
+        ]);
+      })),
+    ])]),
+  ]));
+
+  // --- profesionales ---
+  main.append(el("div", { class: "panel" }, [
+    el("div", { class: "cabecera" }, [el("h2", { text: "Profesionales" })]),
+    el("div", { class: "cuerpo" }, [
+      el("div", { class: "fila" }, c.profesionales.map((p) =>
+        el("span", { class: "chip gris", text: p.nombre }))),
+    ]),
+  ]));
+}
+
+// ---------- render ----------
+const VISTAS = {
+  facturacion: vistaFacturacion,
+  tablero: vistaTablero,
+  pacientes: vistaPacientes,
+  apross: vistaApross,
+  configuracion: vistaConfiguracion,
+};
+
+async function render() {
+  const main = $("#main");
+  main.replaceChildren(el("p", { class: "nota", text: "Cargando…" }));
+  document.querySelectorAll("#tabs button").forEach((b) =>
+    b.setAttribute("aria-current", String(b.dataset.vista === estado.vista)));
+  try {
+    const nuevo = el("div", { style: "display:flex;flex-direction:column;gap:18px" });
+    await VISTAS[estado.vista](nuevo);
+    main.replaceChildren(...nuevo.childNodes);
+  } catch (e) {
+    main.replaceChildren(el("div", { class: "aviso error" },
+      [el("span", { text: e.message })]));
+  }
+}
+
+function iniciar() {
+  const anioActual = new Date().getFullYear();
+  const sel = $("#anio");
+  for (let a = anioActual - 3; a <= anioActual + 2; a++) {
+    sel.append(el("option", { value: a, text: a, selected: a === estado.anio }));
+  }
+  sel.addEventListener("change", (e) => {
+    estado.anio = +e.target.value;
+    estado.pacienteAbierto = null;
+    render();
+  });
+
+  $("#hoy").addEventListener("change", (e) => { estado.hoy = e.target.value; render(); });
+  $("#hoy-reset").addEventListener("click", () => {
+    estado.hoy = ""; $("#hoy").value = ""; render();
+  });
+
+  $("#tabs").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    estado.vista = b.dataset.vista;
+    estado.pacienteAbierto = null;
+    render();
+  });
+
+  render();
+}
+
+iniciar();
+</script>
+</body>
+</html>

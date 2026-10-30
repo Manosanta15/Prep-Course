@@ -1,7 +1,47 @@
-# Facturación de sesiones de kinesiología — diseño del sistema
+# Facturación de sesiones de kinesiología
 
-Este directorio contiene el diseño de la lógica para reemplazar las dos planillas
-históricas por un programa, y el script que las fusiona en un modelo normalizado.
+Reemplazo de las dos planillas históricas por un sistema. Corre con Python solo,
+**sin instalar nada**, y está armado para ser después una parte de un programa de
+gestión administrativa web: el motor no sabe de pantallas, la base no sabe de reglas,
+y la interfaz es un cliente de la misma API que va a consumir el sistema grande.
+
+## Probarlo ahora
+
+```bash
+cd facturacion/motor
+python3 datos_demo.py
+python3 servidor.py
+```
+
+Y abrir http://localhost:8080. Los datos de prueba traen un año completo ya facturado
+para que el semáforo tenga los cuatro colores desde el arranque.
+
+> El control **"Ver al día"** de la barra superior es el que más sirve para la puesta a
+> punto: el semáforo depende de la fecha, así que poniendo una fecha futura se ve cómo
+> va a quedar el tablero en diciembre sin esperar a diciembre.
+
+Los valores de módulo, CUIT y topes de los datos de prueba son los reales de las
+planillas; los nombres de pacientes son ficticios.
+
+## Las piezas
+
+| | |
+| --- | --- |
+| `motor/modelo.py` | Las entidades, sin dependencias |
+| `motor/sesiones.py` | Genera las sesiones del mes y las explica fecha por fecha |
+| `motor/cobranza.py` | Semáforo, cuadro de montos y tablero anual |
+| `motor/facturacion.py` | Emitir, anular, pagar, revertir |
+| `motor/confirmaciones.py` | Los mensajes de confirmación, con el impacto calculado |
+| `motor/feriados.py` | Feriados nacionales, con Pascua calculada |
+| `motor/persistencia.py` | SQLite |
+| `motor/servicios.py` | Une el motor con la base; es lo que consume la API |
+| `motor/servidor.py` | API HTTP + sirve la página |
+| `web/index.html` | La interfaz. Sin build, sin framework |
+
+Las capas no se saltean: la página no tiene ninguna regla de negocio, pide todo a la
+API; `servicios.py` es el único módulo que conoce a la vez el motor y la base. Por eso
+el día que esto entre en el programa de gestión se cambia la capa de arriba y el motor
+queda igual.
 
 - **[DISENO_LOGICA.md](DISENO_LOGICA.md)** — las tres maneras posibles de armar la
   lógica, la recomendada, el modelo de datos y todas las reglas de negocio.
@@ -21,11 +61,11 @@ cd facturacion/scripts
 python3 extraer_planillas.py SESIONES_A_FACTURAR_DISCAPACIDAD.xlsx Facturacion_2026.xlsx --anio 2026 --salida ../datos
 ```
 
-Tests (sólo biblioteca estándar):
+Tests (sólo biblioteca estándar, 107 casos):
 
 ```bash
 cd facturacion/motor
-python3 -m unittest test_sesiones test_cobranza
+python3 -m unittest test_sesiones test_cobranza test_persistencia
 ```
 
 Un año completo corrible, con los cuadros de cobranza:
@@ -159,6 +199,20 @@ sin_factura=104  sin_devengado=443
     hoja que facturan 20. La hoja misma lo insinúa, con anotaciones como "se habían
     pedido 5" y "esperando autorización". Es el dato que hay que reconfirmar paciente
     por paciente antes de migrar.
+
+## Antes de usarlo con datos reales
+
+Tres cosas que faltan y que no son del diseño sino del despliegue:
+
+1. **No tiene usuarios ni contraseña.** `servidor.py` escucha sólo en `127.0.0.1`, o
+   sea la propia máquina. Para que entre más de una persona desde la web hace falta
+   autenticación y ponerlo detrás de un servidor real; `http.server` alcanza para la
+   puesta a punto, no para publicar.
+2. **La base es un archivo.** `facturacion.db` se copia para respaldar y se borra para
+   empezar de nuevo. Para varios usuarios a la vez conviene pasar a PostgreSQL:
+   `persistencia.py` es el único módulo que habría que tocar.
+3. **Hay que reconfirmar los días autorizados de cada paciente** antes de migrar el
+   histórico. Ver el hallazgo 10.
 
 ## Datos personales
 

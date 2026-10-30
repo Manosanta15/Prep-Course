@@ -6,3 +6,4 @@ datos/
 *.xls
 __pycache__/
 *.pyc
+*.db
