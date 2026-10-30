@@ -10,11 +10,13 @@ y la interfaz es un cliente de la misma API que va a consumir el sistema grande.
 ```bash
 cd facturacion/motor
 python3 datos_demo.py
+python3 usuarios.py crear --rol admin
 python3 servidor.py
 ```
 
-Y abrir http://localhost:8080. Los datos de prueba traen un año completo ya facturado
-para que el semáforo tenga los cuatro colores desde el arranque.
+Y abrir http://localhost:8080. La clave se pide por teclado y no se ve al escribirla.
+Los datos de prueba traen un año completo ya facturado para que el semáforo tenga los
+cuatro colores desde el arranque.
 
 > El control **"Ver al día"** de la barra superior es el que más sirve para la puesta a
 > punto: el semáforo depende de la fecha, así que poniendo una fecha futura se ve cómo
@@ -33,6 +35,8 @@ planillas; los nombres de pacientes son ficticios.
 | `motor/facturacion.py` | Emitir, anular, pagar, revertir |
 | `motor/confirmaciones.py` | Los mensajes de confirmación, con el impacto calculado |
 | `motor/feriados.py` | Feriados nacionales, con Pascua calculada |
+| `motor/autenticacion.py` | Usuarios, claves, sesiones y auditoría |
+| `motor/usuarios.py` | Alta y mantenimiento de usuarios, desde la terminal |
 | `motor/persistencia.py` | SQLite |
 | `motor/servicios.py` | Une el motor con la base; es lo que consume la API |
 | `motor/servidor.py` | API HTTP + sirve la página |
@@ -61,11 +65,11 @@ cd facturacion/scripts
 python3 extraer_planillas.py SESIONES_A_FACTURAR_DISCAPACIDAD.xlsx Facturacion_2026.xlsx --anio 2026 --salida ../datos
 ```
 
-Tests (sólo biblioteca estándar, 107 casos):
+Tests (sólo biblioteca estándar, 161 casos):
 
 ```bash
 cd facturacion/motor
-python3 -m unittest test_sesiones test_cobranza test_persistencia
+python3 -m unittest test_sesiones test_cobranza test_persistencia test_autenticacion test_servidor
 ```
 
 Un año completo corrible, con los cuadros de cobranza:
@@ -200,17 +204,104 @@ sin_factura=104  sin_devengado=443
     pedido 5" y "esperando autorización". Es el dato que hay que reconfirmar paciente
     por paciente antes de migrar.
 
-## Antes de usarlo con datos reales
+## Usuarios y permisos
 
-Tres cosas que faltan y que no son del diseño sino del despliegue:
+Tres roles. El permiso se verifica **en el servidor**, en cada ruta: esconder un botón
+en la pantalla no protege nada, porque cualquiera puede llamar a la API directamente.
 
-1. **No tiene usuarios ni contraseña.** `servidor.py` escucha sólo en `127.0.0.1`, o
-   sea la propia máquina. Para que entre más de una persona desde la web hace falta
-   autenticación y ponerlo detrás de un servidor real; `http.server` alcanza para la
-   puesta a punto, no para publicar.
-2. **La base es un archivo.** `facturacion.db` se copia para respaldar y se borra para
-   empezar de nuevo. Para varios usuarios a la vez conviene pasar a PostgreSQL:
-   `persistencia.py` es el único módulo que habría que tocar.
+| Rol | Puede |
+| --- | --- |
+| `admin` | Todo, incluida la configuración, los usuarios y la auditoría |
+| `operador` | Facturar, cobrar y cargar pacientes; no toca la configuración |
+| `lectura` | Sólo mirar |
+
+El primer usuario se crea desde la terminal del servidor, no desde la web, así el
+sistema nunca tiene una cuenta con clave conocida esperando a que alguien la cambie:
+
+```bash
+python3 usuarios.py crear --rol admin
+```
+
+Después, un admin crea y administra el resto desde la pestaña **Usuarios**.
+`usuarios.py` sirve igual para blanquear una clave, cambiar un rol, dar de baja o leer
+la auditoría sin entrar a la web.
+
+### Qué protege el sistema
+
+- **Las claves se guardan con scrypt**, con sal por usuario y los parámetros dentro del
+  hash para poder subirlos después sin invalidar las claves cargadas. La clave nunca se
+  guarda ni aparece en la auditoría.
+- **El token de sesión también se guarda hasheado**: quien se lleve el archivo de la
+  base no puede usar las sesiones abiertas.
+- **Las sesiones son revocables y vencen a las 12 horas.** Dar de baja a alguien o
+  cambiar una clave cierra sus sesiones en el momento.
+- **Bloqueo por intentos**: 5 fallidos bloquean al usuario 15 minutos, y 10 desde una
+  misma dirección la frenan aunque pruebe usuarios distintos.
+- **CSRF**: los POST exigen un encabezado con el token de la sesión, que otro sitio no
+  puede leer. Sin eso, la cookie sola alcanzaría para que una página ajena dispare una
+  anulación en nombre del usuario.
+- **Cookie `HttpOnly` y `SameSite=Strict`**, y `Secure` cuando corre tras HTTPS.
+- **Auditoría**: cada cambio queda con usuario, momento e IP, y los ingresos fallidos
+  también. Se ve en la pestaña Usuarios o con `python3 usuarios.py auditoria`.
+- **El mensaje de ingreso no distingue** entre usuario inexistente y clave equivocada,
+  para que no se pueda averiguar quién tiene cuenta.
+
+Hay 54 tests sobre esto, y varios prueban que algo **no** se pueda: que un rol de
+lectura no emita facturas, que un POST sin el token de CSRF se rechace, que la
+auditoría no guarde claves.
+
+## Publicarlo
+
+**Falta una sola cosa, y es imprescindible: HTTPS.** Sin TLS la clave de cada usuario
+viaja en claro por la red y nada de lo anterior sirve. El servidor se niega a arrancar
+escuchando fuera de la propia máquina si no se le dice que hay un proxy con certificado
+adelante.
+
+Hay que poner nginx o Caddy delante. Con Caddy el certificado se gestiona solo:
+
+```
+facturacion.tudominio.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+Con nginx, suponiendo el certificado ya emitido con certbot:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name facturacion.tudominio.com;
+
+    ssl_certificate     /etc/letsencrypt/live/facturacion.tudominio.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/facturacion.tudominio.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Y el servidor se arranca así:
+
+```bash
+python3 servidor.py --host 127.0.0.1 --detras-de-proxy-https
+```
+
+Esa opción marca la cookie como `Secure`, activa HSTS y hace que la IP de la auditoría
+salga de `X-Forwarded-For` en lugar de ser siempre la del proxy.
+
+## Lo que sigue faltando
+
+1. **La base es un archivo.** `facturacion.db` se copia para respaldar y se borra para
+   empezar de nuevo. **Hacé copias**: ahí está toda la facturación. Para muchos
+   usuarios a la vez conviene pasar a PostgreSQL, y `persistencia.py` es el único
+   módulo que habría que tocar.
+2. **`http.server` no está pensado para mucha carga.** Para una decena de personas
+   alcanza; si crece, el paso siguiente es mover la API a algo como uvicorn, que no
+   cambia el motor.
 3. **Hay que reconfirmar los días autorizados de cada paciente** antes de migrar el
    histórico. Ver el hallazgo 10.
 

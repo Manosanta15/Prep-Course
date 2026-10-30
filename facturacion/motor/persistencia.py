@@ -17,9 +17,9 @@ Las facturas y los pagos si se guardan siempre: son hechos, no calculos.
 
 import sqlite3
 from datetime import date
-from pathlib import Path
 from typing import Iterable, Optional
 
+import autenticacion
 from modelo import (
     Autorizacion,
     AutorizacionDia,
@@ -198,6 +198,7 @@ def conectar(ruta: str = "facturacion.db") -> sqlite3.Connection:
     con = sqlite3.connect(ruta)
     con.row_factory = sqlite3.Row
     con.executescript(ESQUEMA)
+    autenticacion.crear_esquema(con)
     con.commit()
     return con
 

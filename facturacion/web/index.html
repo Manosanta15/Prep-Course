@@ -62,6 +62,9 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; }
+/* Sin esto, cualquier clase con display:flex le gana al [hidden] del navegador
+   y los elementos ocultos se siguen viendo. */
+[hidden] { display: none !important; }
 body {
   background: var(--bg); color: var(--fg);
   font: 14px/1.5 var(--fuente);
@@ -260,6 +263,17 @@ dialog p { margin: 0; }
        border-radius: var(--radio); padding: 5px 8px; }
 .dia input[type="time"] { border: 0; background: none; width: 80px; }
 
+/* ---------- ingreso ---------- */
+.ingreso { min-height: 70vh; display: grid; place-items: center; }
+.ingreso form { width: min(380px, 100%); display: flex; flex-direction: column; gap: 14px; }
+.ingreso h2 { font-size: 1.1rem; }
+.ingreso input { padding: 8px 10px; }
+.sesion { display: flex; align-items: center; gap: 8px; }
+.sesion .quien { font-size: 0.8rem; color: var(--fg-suave); }
+.rol { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+       font-weight: 700; padding: 1px 6px; border-radius: 4px;
+       color: var(--acento); background: var(--acento-suave); }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
@@ -284,6 +298,7 @@ dialog p { margin: 0; }
     <button data-vista="pacientes">Pacientes</button>
     <button data-vista="apross">APROSS</button>
     <button data-vista="configuracion">Configuración</button>
+    <button data-vista="usuarios" hidden>Usuarios</button>
   </nav>
 </header>
 
@@ -313,6 +328,7 @@ dialog p { margin: 0; }
 "use strict";
 
 const estado = {
+  sesion: null,        // { usuario, csrf, permisos } cuando hay sesion abierta
   vista: "facturacion",
   anio: new Date().getFullYear(),
   mes: new Date().getMonth() + 1,
@@ -356,19 +372,29 @@ function qs(extra = {}) {
 }
 async function get(ruta, extra) {
   const r = await fetch(`${ruta}?${qs(extra)}`);
-  const d = await r.json();
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401) { caducar(); throw new Error("La sesión expiró."); }
   if (!r.ok) throw new Error(d.error || "Error al consultar");
   return d;
 }
 async function post(ruta, cuerpo) {
+  const cabeceras = { "Content-Type": "application/json" };
+  // El servidor exige este encabezado en todo POST: sin él, otro sitio podría
+  // disparar la petición usando la cookie del navegador.
+  if (estado.sesion?.csrf) cabeceras["X-CSRF-Token"] = estado.sesion.csrf;
   const r = await fetch(ruta, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(cuerpo),
+    method: "POST", headers: cabeceras, body: JSON.stringify(cuerpo),
   });
-  const d = await r.json();
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401) { caducar(); throw new Error("La sesión expiró."); }
   if (!r.ok) throw new Error(d.error || "Error al guardar");
   return d;
+}
+
+function caducar() {
+  estado.sesion = null;
+  pintarSesion();
+  pantallaIngreso("La sesión expiró. Entrá de nuevo.");
 }
 
 // ---------- avisos ----------
@@ -1116,6 +1142,156 @@ async function vistaConfiguracion(main) {
   ]));
 }
 
+// ---------- ingreso ----------
+function pantallaIngreso(mensaje = "", hayUsuarios = true) {
+  document.querySelector("header").hidden = true;
+
+  const usuario = el("input", { type: "text", id: "ing-usuario", required: true,
+    autocomplete: "username", autocapitalize: "none", spellcheck: "false" });
+  const clave = el("input", { type: "password", id: "ing-clave", required: true,
+    autocomplete: "current-password" });
+  const boton = el("button", { class: "btn primario", type: "submit",
+    text: "Entrar" });
+  const error = el("div", { class: "aviso error", hidden: !mensaje },
+    [el("span", { text: mensaje })]);
+
+  const form = el("form", {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      boton.disabled = true;
+      boton.textContent = "Entrando…";
+      try {
+        const d = await post("/api/sesion",
+          { usuario: usuario.value, clave: clave.value });
+        clave.value = "";
+        await arrancarSesion();
+        toast(`Hola, ${d.usuario.nombre || d.usuario.usuario}`, "ok");
+      } catch (err) {
+        error.hidden = false;
+        error.replaceChildren(el("span", { text: err.message }));
+        clave.value = "";
+        clave.focus();
+      } finally {
+        boton.disabled = false;
+        boton.textContent = "Entrar";
+      }
+    },
+  }, [
+    el("h2", { text: "Facturación de sesiones" }),
+    hayUsuarios ? null : el("div", { class: "aviso" }, [el("span", { text:
+      "Todavía no hay ningún usuario. Creá el primero desde la máquina del " +
+      "servidor con: python3 usuarios.py crear --rol admin" })]),
+    error,
+    campoV("Usuario", usuario),
+    campoV("Clave", clave),
+    boton,
+  ]);
+
+  $("#main").replaceChildren(el("div", { class: "ingreso" }, [form]));
+  usuario.focus();
+}
+
+function pintarSesion() {
+  document.querySelector("header").hidden = !estado.sesion;
+  let caja = document.querySelector(".sesion");
+  if (!estado.sesion) { caja?.remove(); return; }
+  if (!caja) {
+    caja = el("div", { class: "sesion" });
+    document.querySelector(".barra").append(caja);
+  }
+  const u = estado.sesion.usuario;
+  caja.replaceChildren(
+    el("span", { class: "quien", text: u.nombre || u.usuario }),
+    el("span", { class: "rol", text: u.rol }),
+    el("button", { class: "btn chico", text: "Cambiar clave",
+      onclick: dialogoCambiarClave }),
+    el("button", { class: "btn chico", text: "Salir",
+      onclick: () => accion(async () => {
+        await post("/api/sesion/cerrar", {});
+        estado.sesion = null;
+        pintarSesion();
+        pantallaIngreso("Sesión cerrada.");
+      }) }));
+
+  // Las pestañas que el rol no puede usar no se muestran.
+  const permisos = estado.sesion.permisos || {};
+  document.querySelectorAll("#tabs button").forEach((b) => {
+    const necesita = { configuracion: "configurar", usuarios: "usuarios" };
+    const p = necesita[b.dataset.vista];
+    b.hidden = p ? !permisos[p] : false;
+  });
+}
+
+function dialogoCambiarClave() {
+  const dlg = $("#dlg");
+  $("#dlg-nivel").textContent = "Clave";
+  $("#dlg-nivel").className = "nivel nivel-2";
+  $("#dlg-titulo").textContent = "Cambiar mi clave";
+  $("#dlg-detalle").textContent =
+    "Al cambiarla se cierran todas tus sesiones, incluida esta: vas a tener " +
+    "que entrar de nuevo.";
+
+  const caja = $("#dlg-escribir-caja");
+  caja.hidden = false;
+  const actual = el("input", { type: "password", id: "cc-actual",
+    autocomplete: "current-password" });
+  const nueva = el("input", { type: "password", id: "cc-nueva",
+    autocomplete: "new-password" });
+  caja.replaceChildren(el("div", { class: "grilla" }, [
+    campoV("Clave actual", actual),
+    campoV("Clave nueva (10 caracteres o más)", nueva),
+  ]));
+
+  const ok = $("#dlg-ok");
+  ok.disabled = false;
+  ok.className = "btn primario";
+  ok.textContent = "Cambiar clave";
+
+  dlg.addEventListener("close", function cerrado() {
+    dlg.removeEventListener("close", cerrado);
+    const confirmado = dlg.returnValue === "ok";
+    const datos = { clave_actual: actual.value, clave_nueva: nueva.value };
+    caja.replaceChildren(
+      el("label", { for: "dlg-escribir", html: 'Escribí <code id="dlg-esperado"></code> para confirmar' }),
+      el("input", { type: "text", id: "dlg-escribir", autocomplete: "off" }));
+    caja.hidden = true;
+    if (!confirmado) return;
+    accion(async () => {
+      const r = await post("/api/sesion/cambiar-clave", datos);
+      estado.sesion = null;
+      pintarSesion();
+      pantallaIngreso(r.mensaje || "Clave cambiada. Entrá de nuevo.");
+    });
+  });
+  dlg.showModal();
+  actual.focus();
+}
+
+async function arrancarSesion() {
+  const r = await fetch("/api/sesion/actual");
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.autenticado) {
+    estado.sesion = null;
+    pintarSesion();
+    pantallaIngreso("", d.hay_usuarios !== false);
+    return false;
+  }
+  estado.sesion = { usuario: d.usuario, csrf: d.csrf, permisos: d.permisos };
+  pintarSesion();
+  if (d.usuario.debe_cambiar_clave) {
+    toast("Tenés una clave puesta por un administrador: cambiala.", "error");
+  }
+  if (!VISTAS[estado.vista] || !puedeVer(estado.vista)) estado.vista = "facturacion";
+  await render();
+  return true;
+}
+
+function puedeVer(vista) {
+  const necesita = { configuracion: "configurar", usuarios: "usuarios" };
+  const p = necesita[vista];
+  return !p || !!estado.sesion?.permisos?.[p];
+}
+
 // ---------- render ----------
 const VISTAS = {
   facturacion: vistaFacturacion,
@@ -1123,7 +1299,158 @@ const VISTAS = {
   pacientes: vistaPacientes,
   apross: vistaApross,
   configuracion: vistaConfiguracion,
+  usuarios: vistaUsuarios,
 };
+
+async function vistaUsuarios(main) {
+  const [usuarios, registros] = await Promise.all([
+    get("/api/usuarios"), get("/api/auditoria", { limite: 100 }),
+  ]);
+  const yo = estado.sesion.usuario.id;
+
+  const nuevo = {
+    usuario: el("input", { type: "text", id: "nu-usuario", autocapitalize: "none" }),
+    nombre: el("input", { type: "text", id: "nu-nombre" }),
+    clave: el("input", { type: "password", id: "nu-clave", autocomplete: "new-password" }),
+    rol: (() => {
+      const s = el("select", { id: "nu-rol" });
+      ["operador", "lectura", "admin"].forEach((r) =>
+        s.append(el("option", { value: r, text: r })));
+      return s;
+    })(),
+  };
+
+  main.append(el("div", { class: "panel" }, [
+    el("div", { class: "cabecera" }, [el("h2", { text: "Usuarios" })]),
+    el("div", { class: "cuerpo" }, [
+      el("div", { class: "fila" }, [
+        campoV("Usuario", nuevo.usuario), campoV("Nombre", nuevo.nombre),
+        campoV("Clave inicial", nuevo.clave), campoV("Rol", nuevo.rol),
+        el("button", { class: "btn primario", text: "Crear usuario",
+          onclick: () => accion(async () => {
+            await post("/api/usuario", {
+              usuario: nuevo.usuario.value, nombre: nuevo.nombre.value,
+              clave: nuevo.clave.value, rol: nuevo.rol.value });
+            nuevo.clave.value = "";
+            toast("Usuario creado. Decile que cambie la clave al entrar.", "ok");
+            render();
+          }) }),
+      ]),
+      el("p", { class: "nota", text:
+        "admin: todo, incluida la configuración y los usuarios · " +
+        "operador: facturar, cobrar y cargar pacientes · lectura: solo mirar." }),
+    ]),
+    el("div", { class: "scroll" }, [el("table", {}, [
+      el("thead", {}, [el("tr", {}, [
+        el("th", { text: "Usuario" }), el("th", { text: "Nombre" }),
+        el("th", { text: "Rol" }), el("th", { text: "Último acceso" }),
+        el("th", { text: "Estado" }), el("th", { text: "" })])]),
+      el("tbody", {}, usuarios.map((u) => el("tr", {}, [
+        el("td", {}, [el("strong", { text: u.usuario }),
+          u.id === yo ? el("span", { class: "nota", text: " (vos)" }) : null]),
+        el("td", { class: "tenue", text: u.nombre || "—" }),
+        el("td", {}, [(() => {
+          const s = el("select", { disabled: u.id === yo,
+            "aria-label": `Rol de ${u.usuario}`,
+            onchange: (e) => accion(async () => {
+              await post("/api/usuario/rol",
+                { usuario_id: u.id, rol: e.target.value });
+              toast(`${u.usuario} ahora es ${e.target.value}`, "ok");
+              render();
+            }) });
+          ["operador", "lectura", "admin"].forEach((r) =>
+            s.append(el("option", { value: r, text: r, selected: r === u.rol })));
+          return s;
+        })()]),
+        el("td", { class: "tenue num", text: u.ultimo_acceso
+          ? u.ultimo_acceso.slice(0, 16).replace("T", " ") : "nunca" }),
+        el("td", {}, [u.activo
+          ? el("span", { class: "chip verde", text: "Activo" })
+          : el("span", { class: "chip gris", text: "De baja" }),
+          u.debe_cambiar_clave
+            ? el("span", { class: "chip amarillo", text: "Clave sin cambiar" })
+            : null]),
+        el("td", {}, [el("div", { class: "acciones" }, [
+          el("button", { class: "btn chico", text: "Blanquear clave",
+            disabled: u.id === yo,
+            onclick: () => blanquear(u) }),
+          el("button", {
+            class: `btn chico ${u.activo ? "riesgo" : ""}`,
+            text: u.activo ? "Dar de baja" : "Reactivar",
+            disabled: u.id === yo,
+            onclick: () => accion(async () => {
+              await post("/api/usuario/activar",
+                { usuario_id: u.id, activo: !u.activo });
+              toast(u.activo
+                ? `${u.usuario} dado de baja; sus sesiones se cerraron`
+                : `${u.usuario} reactivado`, "ok");
+              render();
+            }) }),
+        ])]),
+      ]))),
+      el("caption", { text: "Dar de baja no borra: el historial queda completo y las sesiones abiertas se cierran. No podés cambiarte el rol ni darte de baja a vos mismo." }),
+    ])]),
+  ]));
+
+  function blanquear(u) {
+    const dlg = $("#dlg");
+    $("#dlg-nivel").textContent = "Clave";
+    $("#dlg-nivel").className = "nivel nivel-3";
+    $("#dlg-titulo").textContent = `Blanquear la clave de ${u.usuario}`;
+    $("#dlg-detalle").textContent =
+      "Se cierran todas sus sesiones y va a tener que cambiarla al entrar. " +
+      "Pasale la clave nueva por un canal aparte, no por el mismo donde " +
+      "recibe el aviso.";
+    const caja = $("#dlg-escribir-caja");
+    caja.hidden = false;
+    const nueva = el("input", { type: "password", id: "bl-clave",
+      autocomplete: "new-password" });
+    caja.replaceChildren(campoV("Clave nueva (10 caracteres o más)", nueva));
+    const ok = $("#dlg-ok");
+    ok.disabled = false; ok.className = "btn riesgo"; ok.textContent = "Blanquear";
+    dlg.addEventListener("close", function cerrado() {
+      dlg.removeEventListener("close", cerrado);
+      const confirmado = dlg.returnValue === "ok";
+      const clave = nueva.value;
+      caja.replaceChildren(
+        el("label", { for: "dlg-escribir", html: 'Escribí <code id="dlg-esperado"></code> para confirmar' }),
+        el("input", { type: "text", id: "dlg-escribir", autocomplete: "off" }));
+      caja.hidden = true;
+      if (!confirmado) return;
+      accion(async () => {
+        await post("/api/usuario/blanquear-clave",
+          { usuario_id: u.id, clave_nueva: clave });
+        toast(`Clave de ${u.usuario} blanqueada`, "ok");
+        render();
+      });
+    });
+    dlg.showModal();
+    nueva.focus();
+  }
+
+  main.append(el("div", { class: "panel" }, [
+    el("div", { class: "cabecera" }, [
+      el("h2", { text: "Auditoría" }),
+      el("span", { class: "nota", text: "los últimos 100 movimientos" }),
+    ]),
+    el("div", { class: "scroll" }, [el("table", {}, [
+      el("thead", {}, [el("tr", {}, [
+        el("th", { text: "Momento" }), el("th", { text: "Usuario" }),
+        el("th", { text: "Acción" }), el("th", { text: "Detalle" }),
+        el("th", { text: "IP" })])]),
+      el("tbody", {}, registros.map((r) => el("tr", {}, [
+        el("td", { class: "num tenue", text: r.momento.slice(0, 19).replace("T", " ") }),
+        el("td", { text: r.usuario || "—" }),
+        el("td", {}, [el("span", {
+          class: `chip ${r.accion === "sesion.fallida" ? "rojo" : "gris"}`,
+          text: r.accion })]),
+        el("td", { class: "tenue", style: "white-space:normal", text: r.detalle || "" }),
+        el("td", { class: "tenue num", text: r.ip || "—" }),
+      ]))),
+      el("caption", { text: "Los ingresos fallidos quedan registrados. Si ves muchos seguidos de una IP desconocida, cambiá las claves." }),
+    ])]),
+  ]));
+}
 
 async function render() {
   const main = $("#main");
@@ -1165,7 +1492,7 @@ function iniciar() {
     render();
   });
 
-  render();
+  arrancarSesion();
 }
 
 iniciar();
