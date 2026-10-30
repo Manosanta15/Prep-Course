@@ -242,16 +242,33 @@ class Factura:
     fecha_emision: Optional[date] = None
     estado: EstadoFactura = EstadoFactura.BORRADOR
     anula_a_factura_id: Optional[int] = None
+    motivo_anulacion: str = ""
+
+    @property
+    def esta_vigente(self) -> bool:
+        return self.estado != EstadoFactura.ANULADA
 
 
 @dataclass
 class Pago:
-    """Hecho inmutable. Una factura admite varios: la suma define el color."""
+    """Hecho inmutable. Una factura admite varios: la suma define el color.
+
+    Un pago no se edita ni se borra. Para deshacerlo se registra otro pago con
+    monto negativo que apunta al original (revierte_a_pago_id). Asi la suma de
+    los montos da siempre el cobrado real y los dos registros quedan a la vista,
+    que es lo que hace falta para un dato que sale hacia la obra social.
+    """
     factura_id: int
     fecha_pago: date
     monto: float
     medio_pago: MedioPago = MedioPago.DEPOSITO
     observaciones: str = ""
+    id: Optional[int] = None
+    revierte_a_pago_id: Optional[int] = None
+
+    @property
+    def es_reversion(self) -> bool:
+        return self.revierte_a_pago_id is not None
 
 
 @dataclass

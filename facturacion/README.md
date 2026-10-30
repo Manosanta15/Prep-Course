@@ -5,8 +5,9 @@ históricas por un programa, y el script que las fusiona en un modelo normalizad
 
 - **[DISENO_LOGICA.md](DISENO_LOGICA.md)** — las tres maneras posibles de armar la
   lógica, la recomendada, el modelo de datos y todas las reglas de negocio.
-- **[motor/](motor/)** — etapas 2 y 3 implementadas: el motor que genera las sesiones a
-  partir de los días autorizados, descontando feriados e internación.
+- **[motor/](motor/)** — etapas 2, 3 y 4 implementadas: el motor que genera las
+  sesiones a partir de los días autorizados descontando feriados e internación, y las
+  facturas, pagos y semáforo de cobranza. 79 tests.
 - **[scripts/extraer_planillas.py](scripts/extraer_planillas.py)** — lee las dos
   planillas, las cruza y produce el modelo normalizado más un informe de conciliación.
 - **datos/** — `seed.json` e `informe.md`, generados. No se versionan.
@@ -20,11 +21,18 @@ cd facturacion/scripts
 python3 extraer_planillas.py SESIONES_A_FACTURAR_DISCAPACIDAD.xlsx Facturacion_2026.xlsx --anio 2026 --salida ../datos
 ```
 
-Tests del motor de sesiones (sólo biblioteca estándar):
+Tests (sólo biblioteca estándar):
 
 ```bash
 cd facturacion/motor
-python3 -m unittest test_sesiones
+python3 -m unittest test_sesiones test_cobranza
+```
+
+Un año completo corrible, con los cuadros de cobranza:
+
+```bash
+cd facturacion/motor
+python3 demo_tablero.py
 ```
 
 Validación del motor contra lo que la planilla factura de verdad:

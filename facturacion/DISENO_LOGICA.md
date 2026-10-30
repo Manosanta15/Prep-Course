@@ -717,8 +717,120 @@ cd facturacion/motor
 python3 validar_contra_planilla.py SESIONES.xlsx --anio 2026
 ```
 
+---
+
+## 11. Etapa 4: facturas, pagos y semáforo
+
+| Archivo | Qué hace |
+| --- | --- |
+| `cobranza.py` | R3: el semáforo, el cuadro de montos y el tablero anual |
+| `facturacion.py` | Emitir, anular, reemplazar, registrar y revertir pagos |
+| `confirmaciones.py` | Los mensajes de la sección 6, con el impacto calculado |
+| `test_cobranza.py` | 45 tests |
+| `demo_tablero.py` | Un año completo corrible, para ver los cuadros sin base cargada |
+
+### El semáforo no se guarda
+
+`estado_cobranza(factura, pagos, obra_social, hoy)` recibe la fecha en que se mira. No
+hay ningún campo "estado" en la base que pueda quedar viejo: una factura pasa de
+amarilla a roja sola, porque el rojo es una consecuencia del paso del tiempo y no un
+dato que alguien tenga que actualizar.
+
+Los días de vencimiento salen de `obra_social.dias_vencimiento`, así que cada obra
+social puede tener el suyo. Hay tests del borde exacto: a los 59 días sigue amarillo, a
+los 60 pasa a rojo.
+
+### El azul gana
+
+Una factura cobrada a medias queda azul **aunque esté vencida**. Es deliberado: no es
+lo mismo que no hayan pagado nada, y conviene que se distinga de un vistazo. La celda
+muestra el saldo al lado del monto:
+
+```
+284.814,26 · saldo 84.814,26
+```
+
+### Pagos: varios por factura, y se revierten en lugar de editarse
+
+Un pago no se edita ni se borra. Para deshacerlo se registra **otro pago con monto
+negativo** que apunta al original. Así `cobrado = suma de los montos` sigue funcionando
+sin ningún caso especial, y los dos registros quedan a la vista.
+
+```python
+p   = registrar_pago(1, factura, [], date(2026, 3, 6))        # 284.814,26
+rev = revertir_pago(2, p, date(2026, 3, 20), "el depósito no se acreditó")
+cobranza.cobrado(factura, [p, rev])                            # 0.0
+```
+
+Al revertirse el pago la factura vuelve al color que le corresponde por antigüedad, que
+a esa altura suele ser rojo. Eso es correcto: la deuda sigue ahí.
+
+Si no se pasa monto, se toma el saldo pendiente —que es lo que la pantalla precarga—.
+Un pago que supera el saldo se rechaza salvo que se confirme con `permitir_exceso`.
+
+### Anular arrastra los pagos
+
+`anular()` pone la factura en `ANULADA`, guarda el motivo (obligatorio) y devuelve las
+reversiones de todos sus pagos. Es exactamente lo que anuncia el mensaje de nivel 3:
+
+> *"Vas a anular la factura 661 de Paciente ejemplo 1 por 351.829,38. Ya figura cobrada
+> 351.829,38 el 06/03/2026. Esto también revierte el pago registrado."*
+> Escribí el número de factura para confirmar: `[____]`
+
+Después, `reemplazar()` arma el borrador que la sustituye apuntando a la anulada. Las
+anuladas no aparecen en el tablero, pero quedan en la base.
+
+### Los dos cuadros
+
+`resumen()` devuelve el cuadro de montos que pediste:
+
+```
+Facturado                          3.526.922,35
+Cobrado          (verde)           1.998.489,00
+Saldo de parciales (azul)            214.805,65
+Pendiente        (amarillo)          870.812,80
+Atrasado +60 días (rojo)             442.814,90
+────────────────────────────────────────────────
+Por cobrar                         1.528.433,35
+```
+
+`tablero_anual()` devuelve el P6: color y monto por paciente y mes, total por paciente,
+total por mes y total por profesional —este último porque la planilla agrupa por "Lic.
+que lo factura"—.
+
+### Las confirmaciones, calculadas
+
+`confirmaciones.py` no muestra nada: calcula el impacto y devuelve el nivel que
+corresponde. La pantalla sólo lo renderiza. El nivel no es fijo por operación, sale de
+lo que está en juego:
+
+| Operación | Nivel | Por qué |
+| --- | --- | --- |
+| Cambiar un horario | 1 · avisar después | Fácil de deshacer |
+| Feriado que cae sábado | 1 · avisar después | No afecta ninguna sesión: no molesta al usuario |
+| Feriado en día hábil | 2 · confirmar antes | Dice a cuántos pacientes alcanza y qué pasa con lo ya emitido |
+| Cambiar el valor de un módulo | 2 · confirmar antes | Dice cuántas recalcula y cuántas no toca |
+| Anular una factura | 3 · escribir | Sale hacia la obra social y puede revertir un pago |
+| Baja de paciente **con** facturas | 3 · escribir | Dice cuántas facturas tiene y que el sistema no borra |
+| Baja de paciente **sin** movimiento | 2 · confirmar antes | No hay nada que perder |
+
+Que un feriado de fin de semana baje a nivel 1 y que una baja sin movimiento baje a
+nivel 2 es parte del punto de la sección 6: si todo confirma igual, la gente deja de
+leer.
+
+### Validación
+
+`demo_tablero.py` recorre un año completo con los valores reales del módulo APE y
+reproduce facturas de la planilla:
+
+| Mes | Sesiones | Valor | Monto calculado | En la planilla |
+| --- | --- | --- | --- | --- |
+| Enero | 21 | 16.753,78 | 351.829,38 | 351.829,38 ✓ |
+| Julio | 22 | 20.127,95 | 442.814,90 | 442.814,90 ✓ |
+
 ### Lo que sigue
 
-Etapa 4: facturas, pagos y semáforo. El modelo ya tiene `Factura`, `Pago` y
-`EstadoCobranza` con el azul de los pagos parciales; falta la función que resuelve el
-estado y la pantalla de carga.
+Etapas 5, 6 y 7: el tablero y la ficha ya tienen sus funciones, falta la interfaz;
+APROSS tiene el cálculo y las confirmaciones, falta la pantalla; y la migración con
+`extraer_planillas.py`, que va última y necesita primero reconfirmar los días
+autorizados de cada paciente.
